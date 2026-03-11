@@ -22,7 +22,20 @@ npx run402-mcp
 
 ## Client Configuration
 
-### Claude Desktop
+### OpenClaw
+
+A standalone skill is available in the [`openclaw/`](./openclaw/) directory — no MCP server required. It calls the Run402 API directly via Node.js scripts.
+
+```bash
+cp -r openclaw ~/.openclaw/skills/run402
+cd ~/.openclaw/skills/run402/scripts && npm install
+```
+
+See [`openclaw/README.md`](./openclaw/README.md) for details.
+
+### MCP Clients
+
+#### Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -37,7 +50,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-### Cursor
+#### Cursor
 
 Add to `.cursor/mcp.json` in your project:
 
@@ -52,7 +65,7 @@ Add to `.cursor/mcp.json` in your project:
 }
 ```
 
-### Cline
+#### Cline
 
 Add to Cline MCP settings:
 
@@ -67,7 +80,7 @@ Add to Cline MCP settings:
 }
 ```
 
-### Claude Code
+#### Claude Code
 
 ```bash
 claude mcp add run402 -- npx -y run402-mcp
