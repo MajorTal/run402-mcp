@@ -1,5 +1,5 @@
 {
-  "name": "run402-cli",
+  "name": "run402",
   "version": "1.0.0",
   "description": "CLI for Run402 — provision Postgres databases, deploy static sites, generate images, and manage wallets via x402 micropayments.",
   "type": "module",

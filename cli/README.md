@@ -5,13 +5,13 @@ Command-line interface for [Run402](https://run402.com) — provision Postgres d
 ## Installation
 
 ```bash
-npm install -g run402-cli
+npm install -g run402
 ```
 
 Or run without installing:
 
 ```bash
-npx run402-cli <command>
+npx run402 <command>
 ```
 
 ## Getting Started
