@@ -12,6 +12,10 @@
 
 Developer tools for [Run402](https://run402.com) — provision Postgres databases, deploy static sites, serverless functions, generate images, and manage x402 wallets. Available as an MCP server, an OpenClaw skill, and a CLI.
 
+<a href="https://glama.ai/mcp/servers/kychee-com/run402">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/kychee-com/run402/badge" alt="run402 MCP server" />
+</a>
+
 English | [简体中文](./README.zh-CN.md)
 
 ## Integrations
