@@ -1,6 +1,6 @@
 # run402-mcp
 
-Developer tools for [Run402](https://run402.com) — provision Postgres databases, deploy static sites, generate images, and manage x402 wallets. Available as an MCP server, an OpenClaw skill, and a CLI.
+Developer tools for [Run402](https://run402.com) — provision Postgres databases, deploy static sites, serverless functions, generate images, and manage x402 wallets. Available as an MCP server, an OpenClaw skill, and a CLI.
 
 English | [简体中文](./README.zh-CN.md)
 
@@ -18,15 +18,47 @@ English | [简体中文](./README.zh-CN.md)
 npx run402-mcp
 ```
 
-## Tools
+## MCP Tools
 
 | Tool | Description |
 |------|-------------|
-| `provision_postgres_project` | Provision a new Postgres database (prototype/hobby/team tier) |
-| `run_sql` | Execute SQL (DDL or queries) against a project |
-| `rest_query` | Query/mutate data via PostgREST REST API |
-| `upload_file` | Upload text content to project storage |
-| `renew_project` | Renew a project's database lease |
+| `provision_postgres_project` | Provision a Postgres database. Handles x402 payment. Saves credentials locally. |
+| `run_sql` | Execute SQL (DDL or queries). Returns markdown table. |
+| `rest_query` | Query/mutate via PostgREST. GET/POST/PATCH/DELETE with query params. |
+| `setup_rls` | Apply row-level security templates to tables. |
+| `get_schema` | Introspect database schema — tables, columns, types, constraints, RLS policies. |
+| `get_usage` | Get project usage report — API calls, storage, limits, lease expiry. |
+| `upload_file` | Upload text content to project storage. |
+| `download_file` | Download a file from project storage. |
+| `delete_file` | Delete a file from project storage. |
+| `list_files` | List files in a storage bucket. |
+| `deploy_function` | Deploy a serverless function (Node 22) to a project. |
+| `invoke_function` | Invoke a deployed function via HTTP. |
+| `get_function_logs` | Get recent logs from a deployed function. |
+| `list_functions` | List all deployed functions for a project. |
+| `delete_function` | Delete a deployed function. |
+| `set_secret` | Set a project secret. Injected as process.env in functions. |
+| `list_secrets` | List secret keys for a project (values not shown). |
+| `delete_secret` | Delete a secret from a project. |
+| `deploy_site` | Deploy static site. $0.05/deployment. Returns live URL. |
+| `claim_subdomain` | Claim custom subdomain (e.g. myapp.run402.com). Free. |
+| `delete_subdomain` | Release a subdomain. |
+| `list_subdomains` | List all subdomains claimed by a project. |
+| `bundle_deploy` | One-call full-stack deploy: database + migrations + RLS + secrets + functions + site + subdomain. |
+| `browse_apps` | Browse public apps available for forking. |
+| `fork_app` | Fork a published app into a new project. |
+| `publish_app` | Publish a project as a forkable app. |
+| `list_versions` | List published versions of a project. |
+| `get_quote` | Get tier pricing. Free, no auth required. |
+| `renew_project` | Renew lease. Handles x402 payment. |
+| `archive_project` | Archive a project and remove from local key store. |
+| `check_balance` | Check billing account balance for a wallet address. |
+| `list_projects` | List all active projects for a wallet address. |
+| `wallet_status` | Check local wallet status — address, network, funding. |
+| `wallet_create` | Create a new local wallet (Base Sepolia testnet). |
+| `wallet_export` | Export the local wallet address. |
+| `request_faucet` | Request free testnet USDC from the Run402 faucet. |
+| `generate_image` | Generate a PNG image from a text prompt. $0.03 via x402. |
 
 ## Client Configuration
 
@@ -35,7 +67,7 @@ npx run402-mcp
 A standalone CLI is available in the [`cli/`](./cli/) directory.
 
 ```bash
-npm install -g run402-cli
+npm install -g run402
 
 run402 wallet create
 run402 wallet fund
@@ -112,11 +144,12 @@ claude mcp add run402 -- npx -y run402-mcp
 
 1. **Provision** — Call `provision_postgres_project` to create a database. The server handles x402 payment negotiation and stores credentials locally.
 2. **Build** — Use `run_sql` to create tables, `rest_query` to insert/query data, and `upload_file` for storage.
-3. **Renew** — Call `renew_project` before your lease expires.
+3. **Deploy** — Use `deploy_site` for static sites, `deploy_function` for serverless functions, or `bundle_deploy` for a full-stack app in one call.
+4. **Renew** — Call `renew_project` before your lease expires.
 
 ### Payment Flow
 
-Provisioning and renewing require x402 micropayments. When payment is needed, tools return payment details (not errors) so the LLM can reason about them and guide the user through payment.
+Provisioning, renewing, site deployment, bundle deploy, and image generation require x402 micropayments. When payment is needed, tools return payment details (not errors) so the LLM can reason about them and guide the user through payment.
 
 ### Key Storage
 
@@ -136,8 +169,10 @@ Project credentials are saved to `~/.config/run402/projects.json` with `0600` pe
 ## Development
 
 ```bash
-npm run build
-npm run test:skill
+npm run build          # tsc → dist/
+npm test               # all tests (SKILL + sync + unit)
+npm run test:sync      # check MCP/CLI/OpenClaw stay in sync
+npm run test:skill     # validate SKILL.md structure
 ```
 
 ## License
