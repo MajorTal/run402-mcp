@@ -1,0 +1,29 @@
+{
+  "name": "run402-cli",
+  "version": "1.0.0",
+  "description": "CLI for Run402 — provision Postgres databases, deploy static sites, generate images, and manage wallets via x402 micropayments.",
+  "type": "module",
+  "bin": {
+    "run402": "./cli.mjs"
+  },
+  "files": [
+    "cli.mjs",
+    "lib/"
+  ],
+  "dependencies": {
+    "@x402/evm": "^2.6.0",
+    "@x402/fetch": "^2.6.0",
+    "viem": "^2.47.1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "homepage": "https://run402.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kychee-com/run402-mcp.git",
+    "directory": "cli"
+  },
+  "keywords": ["run402", "x402", "postgres", "ai-agent", "openclaw"]
+}

@@ -1,8 +1,16 @@
 # run402-mcp
 
-MCP server for [Run402](https://run402.com) — provision and manage AI-native Postgres databases from any MCP-compatible client.
+Developer tools for [Run402](https://run402.com) — provision Postgres databases, deploy static sites, generate images, and manage x402 wallets. Available as an MCP server, an OpenClaw skill, and a CLI.
 
 English | [简体中文](./README.zh-CN.md)
+
+## Integrations
+
+| Interface | Use when... |
+|-----------|-------------|
+| [`cli/`](./cli/) | Terminal, scripts, CI/CD |
+| [`openclaw/`](./openclaw/) | OpenClaw agent (no MCP required) |
+| MCP server (this package) | Claude Desktop, Cursor, Cline, Claude Code |
 
 ## Quick Start
 
@@ -21,6 +29,20 @@ npx run402-mcp
 | `renew_project` | Renew a project's database lease |
 
 ## Client Configuration
+
+### CLI
+
+A standalone CLI is available in the [`cli/`](./cli/) directory.
+
+```bash
+npm install -g run402-cli
+
+run402 wallet create
+run402 wallet fund
+run402 deploy --tier prototype --manifest app.json
+```
+
+See [`cli/README.md`](./cli/README.md) for full usage.
 
 ### OpenClaw
 

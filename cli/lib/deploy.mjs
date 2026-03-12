@@ -1,0 +1,92 @@
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "fs";
+import { readWallet, loadProjects, API, WALLET_FILE, PROJECTS_FILE } from "./config.mjs";
+
+const HELP = `run402 deploy — Deploy a full-stack app or static site on Run402
+
+Usage:
+  run402 deploy [options]
+  cat manifest.json | run402 deploy [options]
+
+Options:
+  --tier <tier>        Deployment tier: prototype | hobby | team  (default: prototype)
+  --manifest <file>    Path to manifest JSON file  (default: read from stdin)
+  --help, -h           Show this help message
+
+Tiers:
+  prototype   Smallest, cheapest — great for demos and experiments
+  hobby       Mid-tier — personal projects and side hustles
+  team        Full power — production-ready, shared team access
+
+Manifest format (JSON):
+  {
+    "name": "my-app",
+    "files": {
+      "index.html": "<html>...</html>",
+      "style.css": "body { margin: 0; }"
+    },
+    "env": {
+      "MY_VAR": "value"
+    }
+  }
+
+Examples:
+  run402 deploy --tier prototype --manifest app.json
+  run402 deploy --tier hobby --manifest app.json
+  cat app.json | run402 deploy --tier team
+
+Notes:
+  - Requires a funded wallet (run402 wallet create && run402 wallet fund)
+  - Payments are processed automatically via x402 micropayments (Base Sepolia USDC)
+  - Project credentials (project_id, keys, URL) are saved locally after deploy
+  - Use 'run402 projects list' to see all deployed projects
+`;
+
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf-8");
+}
+
+function saveProject(project) {
+  const projects = loadProjects();
+  projects.push({ project_id: project.project_id, anon_key: project.anon_key, service_key: project.service_key, tier: project.tier, lease_expires_at: project.lease_expires_at, site_url: project.site_url || project.subdomain_url, deployed_at: new Date().toISOString() });
+  const dir = PROJECTS_FILE.replace(/\/[^/]+$/, "");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2), { mode: 0o600 });
+}
+
+export async function run(args) {
+  const opts = { tier: "prototype", manifest: null };
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--help" || args[i] === "-h") { console.log(HELP); process.exit(0); }
+    if (args[i] === "--tier" && args[i + 1]) opts.tier = args[++i];
+    if (args[i] === "--manifest" && args[i + 1]) opts.manifest = args[++i];
+  }
+
+  if (!existsSync(WALLET_FILE)) {
+    console.error(JSON.stringify({ status: "error", message: "No wallet found. Run: run402 wallet create && run402 wallet fund" }));
+    process.exit(1);
+  }
+  const wallet = readWallet();
+  const manifest = opts.manifest ? JSON.parse(readFileSync(opts.manifest, "utf-8")) : JSON.parse(await readStdin());
+
+  const { privateKeyToAccount } = await import("viem/accounts");
+  const { createPublicClient, http } = await import("viem");
+  const { baseSepolia } = await import("viem/chains");
+  const { x402Client, wrapFetchWithPayment } = await import("@x402/fetch");
+  const { ExactEvmScheme } = await import("@x402/evm/exact/client");
+  const { toClientEvmSigner } = await import("@x402/evm");
+
+  const account = privateKeyToAccount(wallet.privateKey);
+  const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
+  const signer = toClientEvmSigner(account, publicClient);
+  const client = new x402Client();
+  client.register("eip155:84532", new ExactEvmScheme(signer));
+  const fetchPaid = wrapFetchWithPayment(fetch, client);
+
+  const res = await fetchPaid(`${API}/v1/deploy/${opts.tier}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(manifest) });
+  const result = await res.json();
+  if (!res.ok) { console.error(JSON.stringify({ status: "error", http: res.status, ...result })); process.exit(1); }
+  saveProject(result);
+  console.log(JSON.stringify(result, null, 2));
+}

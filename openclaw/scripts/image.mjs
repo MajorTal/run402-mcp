@@ -13,49 +13,35 @@
  * Cost: $0.03 per image via x402.
  */
 
-import { readFileSync, writeFileSync, existsSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-
-const CONFIG_DIR = process.env.RUN402_CONFIG_DIR || join(homedir(), ".config", "run402");
-const WALLET_FILE = join(CONFIG_DIR, "wallet.json");
-const API = process.env.RUN402_API_BASE || "https://api.run402.com";
+import { writeFileSync, existsSync } from "fs";
+import { readWallet, API, WALLET_FILE } from "./config.mjs";
 
 function parseArgs() {
   const args = process.argv.slice(2);
   const opts = { command: null, prompt: null, aspect: "square", output: null };
-
   if (args.length === 0) return opts;
   opts.command = args[0];
-
   let i = 1;
-  // First non-flag arg is the prompt
-  if (i < args.length && !args[i].startsWith("--")) {
-    opts.prompt = args[i++];
-  }
-
+  if (i < args.length && !args[i].startsWith("--")) opts.prompt = args[i++];
   while (i < args.length) {
     if (args[i] === "--aspect" && args[i + 1]) { opts.aspect = args[++i]; }
     else if (args[i] === "--output" && args[i + 1]) { opts.output = args[++i]; }
     i++;
   }
-
   return opts;
 }
 
 async function generate(opts) {
   if (!opts.prompt) {
-    console.error(JSON.stringify({ status: "error", message: "Prompt required. Usage: node image.mjs generate \"description\" [--aspect square|landscape|portrait] [--output file.png]" }));
+    console.error(JSON.stringify({ status: "error", message: "Prompt required." }));
     process.exit(1);
   }
-
   if (!existsSync(WALLET_FILE)) {
     console.error(JSON.stringify({ status: "error", message: "No wallet found. Run: node wallet.mjs create && node wallet.mjs fund" }));
     process.exit(1);
   }
-  const wallet = JSON.parse(readFileSync(WALLET_FILE, "utf-8"));
+  const wallet = readWallet();
 
-  // Setup x402 client
   const { privateKeyToAccount } = await import("viem/accounts");
   const { createPublicClient, http } = await import("viem");
   const { baseSepolia } = await import("viem/chains");
@@ -66,12 +52,10 @@ async function generate(opts) {
   const account = privateKeyToAccount(wallet.privateKey);
   const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
   const signer = toClientEvmSigner(account, publicClient);
-
   const client = new x402Client();
   client.register("eip155:84532", new ExactEvmScheme(signer));
   const fetchPaid = wrapFetchWithPayment(fetch, client);
 
-  // Generate image
   const res = await fetchPaid(`${API}/v1/generate-image`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -79,7 +63,6 @@ async function generate(opts) {
   });
 
   const data = await res.json();
-
   if (!res.ok) {
     console.error(JSON.stringify({ status: "error", http: res.status, ...data }));
     process.exit(1);
@@ -88,22 +71,9 @@ async function generate(opts) {
   if (opts.output) {
     const buf = Buffer.from(data.image, "base64");
     writeFileSync(opts.output, buf);
-    console.log(JSON.stringify({
-      status: "ok",
-      file: opts.output,
-      size: buf.length,
-      aspect: data.aspect,
-      content_type: data.content_type,
-    }));
+    console.log(JSON.stringify({ status: "ok", file: opts.output, size: buf.length, aspect: data.aspect }));
   } else {
-    // Output full response with base64
-    console.log(JSON.stringify({
-      status: "ok",
-      aspect: data.aspect,
-      content_type: data.content_type,
-      image_base64_length: data.image.length,
-      image: data.image,
-    }));
+    console.log(JSON.stringify({ status: "ok", aspect: data.aspect, content_type: data.content_type, image: data.image }));
   }
 }
 

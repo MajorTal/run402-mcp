@@ -9,13 +9,7 @@
  *   node wallet.mjs export          # Print wallet address (safe for sharing)
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "fs";
-import { join } from "path";
-import { homedir } from "os";
-
-const CONFIG_DIR = process.env.RUN402_CONFIG_DIR || join(homedir(), ".config", "run402");
-const WALLET_FILE = join(CONFIG_DIR, "wallet.json");
-const API = process.env.RUN402_API_BASE || "https://api.run402.com";
+import { readWallet, saveWallet, API } from "./config.mjs";
 
 async function loadDeps() {
   const { generatePrivateKey, privateKeyToAccount } = await import("viem/accounts");
@@ -24,24 +18,12 @@ async function loadDeps() {
   return { generatePrivateKey, privateKeyToAccount, createPublicClient, http, baseSepolia };
 }
 
-function readWallet() {
-  if (!existsSync(WALLET_FILE)) return null;
-  return JSON.parse(readFileSync(WALLET_FILE, "utf-8"));
-}
-
-function saveWallet(data) {
-  mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(WALLET_FILE, JSON.stringify(data, null, 2), { mode: 0o600 });
-  try { chmodSync(WALLET_FILE, 0o600); } catch {}
-}
-
 async function status() {
   const w = readWallet();
   if (!w) {
     console.log(JSON.stringify({ status: "no_wallet", message: "No wallet found. Run: node wallet.mjs create" }));
     return;
   }
-  // Check balance via faucet-compatible endpoint or just report stored info
   console.log(JSON.stringify({
     status: "ok",
     address: w.address,
@@ -59,14 +41,13 @@ async function create() {
   const { generatePrivateKey, privateKeyToAccount } = await loadDeps();
   const privateKey = generatePrivateKey();
   const account = privateKeyToAccount(privateKey);
-  const data = {
+  saveWallet({
     address: account.address,
     privateKey,
     network: "base-sepolia",
     created: new Date().toISOString(),
     funded: false,
-  };
-  saveWallet(data);
+  });
   console.log(JSON.stringify({ status: "ok", address: account.address, message: "Wallet created and saved." }));
 }
 
@@ -83,9 +64,7 @@ async function fund() {
   });
   const data = await res.json();
   if (res.ok) {
-    w.funded = true;
-    w.lastFaucet = new Date().toISOString();
-    saveWallet(w);
+    saveWallet({ ...w, funded: true, lastFaucet: new Date().toISOString() });
     console.log(JSON.stringify({ status: "ok", ...data }));
   } else {
     console.log(JSON.stringify({ status: "error", ...data }));
@@ -95,10 +74,7 @@ async function fund() {
 
 async function exportAddr() {
   const w = readWallet();
-  if (!w) {
-    console.log(JSON.stringify({ status: "error", message: "No wallet." }));
-    process.exit(1);
-  }
+  if (!w) { console.log(JSON.stringify({ status: "error", message: "No wallet." })); process.exit(1); }
   console.log(w.address);
 }
 
