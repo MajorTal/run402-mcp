@@ -14,6 +14,10 @@ Subcommands:
   publish <id> [--description <desc>] [--tags <t1,t2>] [--visibility <v>] [--fork-allowed]
                                            Publish a project as an app
   versions <id>                            List published versions of a project
+  inspect <version_id>                     Inspect a published app version
+  update  <project_id> <version_id> [--description <desc>] [--tags <t1,t2>] [--visibility <v>] [--fork-allowed] [--no-fork]
+                                           Update a published version
+  delete  <project_id> <version_id>        Delete a published version
 
 Examples:
   run402 apps browse
@@ -21,6 +25,9 @@ Examples:
   run402 apps fork ver_abc123 my-todo --tier prototype
   run402 apps publish proj123 --description "Todo app" --tags todo,auth --visibility public --fork-allowed
   run402 apps versions proj123
+  run402 apps inspect ver_abc123
+  run402 apps update proj123 ver_abc123 --description "Updated" --tags todo
+  run402 apps delete proj123 ver_abc123
 `;
 
 async function browse(args) {
@@ -122,6 +129,49 @@ async function versions(projectId) {
   console.log(JSON.stringify(data, null, 2));
 }
 
+async function inspect(versionId) {
+  if (!versionId) { console.error(JSON.stringify({ status: "error", message: "Missing version ID" })); process.exit(1); }
+  const res = await fetch(`${API}/v1/apps/${versionId}`);
+  const data = await res.json();
+  if (!res.ok) { console.error(JSON.stringify({ status: "error", http: res.status, ...data })); process.exit(1); }
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function update(projectId, versionId, args) {
+  const p = findProject(projectId);
+  const body = {};
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--description" && args[i + 1]) body.description = args[++i];
+    if (args[i] === "--tags" && args[i + 1]) body.tags = args[++i].split(",");
+    if (args[i] === "--visibility" && args[i + 1]) body.visibility = args[++i];
+    if (args[i] === "--fork-allowed") body.fork_allowed = true;
+    if (args[i] === "--no-fork") body.fork_allowed = false;
+  }
+  const res = await fetch(`${API}/admin/v1/projects/${projectId}/versions/${versionId}`, {
+    method: "PATCH",
+    headers: { "Authorization": `Bearer ${p.service_key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) { console.error(JSON.stringify({ status: "error", http: res.status, ...data })); process.exit(1); }
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function deleteVersion(projectId, versionId) {
+  const p = findProject(projectId);
+  const res = await fetch(`${API}/admin/v1/projects/${projectId}/versions/${versionId}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${p.service_key}` },
+  });
+  if (res.status === 204 || res.ok) {
+    console.log(JSON.stringify({ status: "ok", message: `Version ${versionId} deleted.` }));
+  } else {
+    const data = await res.json();
+    console.error(JSON.stringify({ status: "error", http: res.status, ...data }));
+    process.exit(1);
+  }
+}
+
 export async function run(sub, args) {
   if (!sub || sub === '--help' || sub === '-h') { console.log(HELP); process.exit(0); }
   switch (sub) {
@@ -129,6 +179,9 @@ export async function run(sub, args) {
     case "fork":     await fork(args[0], args[1], args.slice(2)); break;
     case "publish":  await publish(args[0], args.slice(1)); break;
     case "versions": await versions(args[0]); break;
+    case "inspect":  await inspect(args[0]); break;
+    case "update":   await update(args[0], args[1], args.slice(2)); break;
+    case "delete":   await deleteVersion(args[0], args[1]); break;
     default:
       console.error(`Unknown subcommand: ${sub}\n`);
       console.log(HELP);

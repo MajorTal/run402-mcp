@@ -23,6 +23,8 @@ Commands:
   subdomains  Manage custom subdomains (claim, list, delete)
   apps        Browse and manage the app marketplace
   image       Generate AI images via x402 micropayments
+  message     Send messages to Run402 developers
+  agent       Manage agent identity (contact info)
 
 Run 'run402 <command> --help' for detailed usage of each command.
 
@@ -95,6 +97,16 @@ switch (cmd) {
   }
   case "image": {
     const { run } = await import("./lib/image.mjs");
+    await run(sub, rest);
+    break;
+  }
+  case "message": {
+    const { run } = await import("./lib/message.mjs");
+    await run(sub, rest);
+    break;
+  }
+  case "agent": {
+    const { run } = await import("./lib/agent.mjs");
     await run(sub, rest);
     break;
   }

@@ -110,13 +110,59 @@ async function versions(projectId) {
   console.log(JSON.stringify(data, null, 2));
 }
 
+async function inspect(versionId) {
+  if (!versionId) { console.error(JSON.stringify({ status: "error", message: "Missing version ID" })); process.exit(1); }
+  const res = await fetch(`${API}/v1/apps/${versionId}`);
+  const data = await res.json();
+  if (!res.ok) { console.error(JSON.stringify({ status: "error", http: res.status, ...data })); process.exit(1); }
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function update(projectId, versionId, extraArgs) {
+  const p = findProject(projectId);
+  const body = {};
+  for (let i = 0; i < extraArgs.length; i++) {
+    if (extraArgs[i] === "--description" && extraArgs[i + 1]) body.description = extraArgs[++i];
+    if (extraArgs[i] === "--tags" && extraArgs[i + 1]) body.tags = extraArgs[++i].split(",");
+    if (extraArgs[i] === "--visibility" && extraArgs[i + 1]) body.visibility = extraArgs[++i];
+    if (extraArgs[i] === "--fork-allowed") body.fork_allowed = true;
+    if (extraArgs[i] === "--no-fork") body.fork_allowed = false;
+  }
+  const res = await fetch(`${API}/admin/v1/projects/${projectId}/versions/${versionId}`, {
+    method: "PATCH",
+    headers: { "Authorization": `Bearer ${p.service_key}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) { console.error(JSON.stringify({ status: "error", http: res.status, ...data })); process.exit(1); }
+  console.log(JSON.stringify(data, null, 2));
+}
+
+async function deleteVersion(projectId, versionId) {
+  const p = findProject(projectId);
+  const res = await fetch(`${API}/admin/v1/projects/${projectId}/versions/${versionId}`, {
+    method: "DELETE",
+    headers: { "Authorization": `Bearer ${p.service_key}` },
+  });
+  if (res.status === 204 || res.ok) {
+    console.log(JSON.stringify({ status: "ok", message: `Version ${versionId} deleted.` }));
+  } else {
+    const data = await res.json();
+    console.error(JSON.stringify({ status: "error", http: res.status, ...data }));
+    process.exit(1);
+  }
+}
+
 const [cmd, ...args] = process.argv.slice(2);
 switch (cmd) {
   case "browse": await browse(args); break;
   case "fork": await fork(args[0], args[1], args.slice(2)); break;
   case "publish": await publish(args[0], args.slice(1)); break;
   case "versions": await versions(args[0]); break;
+  case "inspect": await inspect(args[0]); break;
+  case "update": await update(args[0], args[1], args.slice(2)); break;
+  case "delete": await deleteVersion(args[0], args[1]); break;
   default:
-    console.log("Usage: node apps.mjs <browse|fork|publish|versions> [args...]");
+    console.log("Usage: node apps.mjs <browse|fork|publish|versions|inspect|update|delete> [args...]");
     process.exit(1);
 }

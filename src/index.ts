@@ -55,6 +55,16 @@ import { walletExportSchema, handleWalletExport } from "./tools/wallet-export.js
 import { requestFaucetSchema, handleRequestFaucet } from "./tools/request-faucet.js";
 import { generateImageSchema, handleGenerateImage } from "./tools/generate-image.js";
 
+// New tools — messaging, agent contact, billing, deployments, versions
+import { sendMessageSchema, handleSendMessage } from "./tools/send-message.js";
+import { setAgentContactSchema, handleSetAgentContact } from "./tools/set-agent-contact.js";
+import { createCheckoutSchema, handleCreateCheckout } from "./tools/create-checkout.js";
+import { billingHistorySchema, handleBillingHistory } from "./tools/billing-history.js";
+import { getDeploymentSchema, handleGetDeployment } from "./tools/get-deployment.js";
+import { updateVersionSchema, handleUpdateVersion } from "./tools/update-version.js";
+import { deleteVersionSchema, handleDeleteVersion } from "./tools/delete-version.js";
+import { getAppSchema, handleGetApp } from "./tools/get-app.js";
+
 const server = new McpServer({
   name: "run402",
   version: "1.3.0",
@@ -337,6 +347,70 @@ server.tool(
   "Generate a PNG image from a text prompt. Costs $0.03 USDC via x402. Aspect ratios: square (1:1), landscape (16:9), portrait (9:16).",
   generateImageSchema,
   async (args) => handleGenerateImage(args),
+);
+
+// ─── Messaging & agent contact tools ───────────────────────────────────────
+
+server.tool(
+  "send_message",
+  "Send a message to the Run402 developers. Costs $0.01 USDC via x402.",
+  sendMessageSchema,
+  async (args) => handleSendMessage(args),
+);
+
+server.tool(
+  "set_agent_contact",
+  "Register agent contact info (name, email, webhook) so Run402 can reach you. Costs $0.001 USDC via x402.",
+  setAgentContactSchema,
+  async (args) => handleSetAgentContact(args),
+);
+
+// ─── Billing tools ─────────────────────────────────────────────────────────
+
+server.tool(
+  "create_checkout",
+  "Create a Stripe checkout URL for your human to fund your wallet with a credit card.",
+  createCheckoutSchema,
+  async (args) => handleCreateCheckout(args),
+);
+
+server.tool(
+  "billing_history",
+  "View billing transaction history for a wallet address.",
+  billingHistorySchema,
+  async (args) => handleBillingHistory(args),
+);
+
+// ─── Deployment status tool ────────────────────────────────────────────────
+
+server.tool(
+  "get_deployment",
+  "Get deployment status and URL for a static site deployment.",
+  getDeploymentSchema,
+  async (args) => handleGetDeployment(args),
+);
+
+// ─── Version management tools ──────────────────────────────────────────────
+
+server.tool(
+  "update_version",
+  "Update metadata (description, tags, visibility, fork_allowed) of a published app version.",
+  updateVersionSchema,
+  async (args) => handleUpdateVersion(args),
+);
+
+server.tool(
+  "delete_version",
+  "Delete a published app version.",
+  deleteVersionSchema,
+  async (args) => handleDeleteVersion(args),
+);
+
+server.tool(
+  "get_app",
+  "Inspect a specific published app — details, required secrets, fork pricing.",
+  getAppSchema,
+  async (args) => handleGetApp(args),
 );
 
 const transport = new StdioServerTransport();

@@ -1,13 +1,18 @@
 import { readFileSync, existsSync } from "fs";
 import { readWallet, API, WALLET_FILE } from "./config.mjs";
 
-const HELP = `run402 sites — Deploy static sites
+const HELP = `run402 sites — Deploy and manage static sites
 
 Usage:
   run402 sites deploy --name <name> --manifest <file> [--project <id>] [--target <target>]
+  run402 sites status <deployment_id>
   cat manifest.json | run402 sites deploy --name <name>
 
-Options:
+Subcommands:
+  deploy  Deploy a static site
+  status  Check the status of a deployment
+
+Options (deploy):
   --name <name>         Site name (e.g. 'portfolio', 'family-todo')
   --manifest <file>     Path to manifest JSON file (or read from stdin)
   --project <id>        Optional project ID to link this deployment to
@@ -24,6 +29,7 @@ Manifest format (JSON):
 
 Examples:
   run402 sites deploy --name my-site --manifest site.json
+  run402 sites status dep_abc123
   cat site.json | run402 sites deploy --name my-site
 
 Notes:
@@ -81,12 +87,26 @@ async function deploy(args) {
   console.log(JSON.stringify(data, null, 2));
 }
 
+async function status(args) {
+  let deploymentId = null;
+  for (let i = 0; i < args.length; i++) {
+    if (!args[i].startsWith("-")) { deploymentId = args[i]; break; }
+  }
+  if (!deploymentId) { console.error(JSON.stringify({ status: "error", message: "Missing deployment ID" })); process.exit(1); }
+  const res = await fetch(`${API}/v1/deployments/${deploymentId}`);
+  const data = await res.json();
+  if (!res.ok) { console.error(JSON.stringify({ status: "error", http: res.status, ...data })); process.exit(1); }
+  console.log(JSON.stringify(data, null, 2));
+}
+
 export async function run(sub, args) {
   if (!sub || sub === '--help' || sub === '-h') { console.log(HELP); process.exit(0); }
-  if (sub !== "deploy") {
-    console.error(`Unknown subcommand: ${sub}\n`);
-    console.log(HELP);
-    process.exit(1);
+  switch (sub) {
+    case "deploy":  await deploy(args); break;
+    case "status":  await status(args); break;
+    default:
+      console.error(`Unknown subcommand: ${sub}\n`);
+      console.log(HELP);
+      process.exit(1);
   }
-  await deploy(args);
 }

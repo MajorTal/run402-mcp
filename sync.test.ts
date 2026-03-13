@@ -50,7 +50,7 @@ function parseSubcommands(filePath: string): string[] {
 /** Parse CLI commands as "module:subcommand" pairs */
 function parseCliCommands(): string[] {
   const cmds: string[] = [];
-  for (const mod of ["wallet", "projects", "image", "storage", "functions", "secrets", "sites", "subdomains", "apps"]) {
+  for (const mod of ["wallet", "projects", "image", "storage", "functions", "secrets", "sites", "subdomains", "apps", "message", "agent"]) {
     for (const sub of parseSubcommands(join(__dirname, "cli/lib", `${mod}.mjs`))) {
       cmds.push(`${mod}:${sub}`);
     }
@@ -62,7 +62,7 @@ function parseCliCommands(): string[] {
 /** Parse OpenClaw commands as "module:subcommand" pairs */
 function parseOpenClawCommands(): string[] {
   const cmds: string[] = [];
-  for (const mod of ["wallet", "projects", "image", "storage", "functions", "secrets", "sites", "subdomains", "apps"]) {
+  for (const mod of ["wallet", "projects", "image", "storage", "functions", "secrets", "sites", "subdomains", "apps", "message", "agent"]) {
     for (const sub of parseSubcommands(join(__dirname, "openclaw/scripts", `${mod}.mjs`))) {
       cmds.push(`${mod}:${sub}`);
     }
@@ -90,7 +90,7 @@ function parseLlmsTxtEndpoints(llmsTxt: string): string[] {
   const endpoints: string[] = [];
   // Match table rows like: | `/v1/projects` | POST | ... |
   // or: | `/v1/projects/:id/renew` | POST | ... |
-  const re = /\|\s*`(\/[^`]+)`\s*\|\s*(GET|POST|PATCH|DELETE)\s*\|/g;
+  const re = /\|\s*`(\/[^`]+)`\s*\|\s*(GET|POST|PUT|PATCH|DELETE)\s*\|/g;
   let m;
   while ((m = re.exec(llmsTxt))) {
     endpoints.push(`${m[2]} ${m[1]}`);
@@ -177,6 +177,22 @@ const SURFACE: Capability[] = [
 
   // ── Image generation ─────────────────────────────────────────────────────
   { id: "generate_image",    endpoint: "POST /v1/generate-image",          mcp: "generate_image",   cli: "image:generate",   openclaw: "image:generate" },
+
+  // ── Messaging & agent contact ──────────────────────────────────────────
+  { id: "send_message",      endpoint: "POST /v1/message",                 mcp: "send_message",        cli: "message:send",     openclaw: "message:send" },
+  { id: "set_agent_contact", endpoint: "PUT /v1/agent/contact",            mcp: "set_agent_contact",   cli: "agent:contact",    openclaw: "agent:contact" },
+
+  // ── Additional billing ─────────────────────────────────────────────────
+  { id: "create_checkout",   endpoint: "POST /v1/billing/checkouts",       mcp: "create_checkout",     cli: "wallet:checkout",  openclaw: "wallet:checkout" },
+  { id: "billing_history",   endpoint: "GET /v1/billing/accounts/:wallet/history", mcp: "billing_history", cli: "wallet:history", openclaw: "wallet:history" },
+
+  // ── Deployment status ──────────────────────────────────────────────────
+  { id: "get_deployment",    endpoint: "GET /v1/deployments/:id",          mcp: "get_deployment",      cli: "sites:status",     openclaw: "sites:status" },
+
+  // ── Version management ─────────────────────────────────────────────────
+  { id: "update_version",    endpoint: "PATCH /admin/v1/projects/:id/versions/:version_id", mcp: "update_version", cli: "apps:update", openclaw: "apps:update" },
+  { id: "delete_version",    endpoint: "DELETE /admin/v1/projects/:id/versions/:version_id", mcp: "delete_version", cli: "apps:delete", openclaw: "apps:delete" },
+  { id: "get_app",           endpoint: "GET /v1/apps/:version_id",         mcp: "get_app",             cli: "apps:inspect",     openclaw: "apps:inspect" },
 
   // ── Wallet management ──────────────────────────────────────────────────
   { id: "wallet_status",     endpoint: "(local)",                          mcp: "wallet_status",    cli: "wallet:status",    openclaw: "wallet:status" },
@@ -355,13 +371,76 @@ describe("llms.txt alignment", { skip: !llmsTxtAvailable && "~/dev/run402/site/l
     );
   });
 
+  it("all llms.txt actionable endpoints appear in SURFACE", () => {
+    const documented = parseLlmsTxtEndpoints(llmsTxt);
+    const surfaceEndpoints = SURFACE
+      .filter(c => c.endpoint !== "(local)")
+      .map(c => c.endpoint);
+
+    // Informational GET endpoints and auth/REST proxied endpoints that don't need dedicated tools
+    const IGNORED_ENDPOINTS = new Set([
+      // Info/discovery endpoints (return pricing or schema, no action)
+      "GET /v1/projects",
+      "GET /v1/deployments",
+      "GET /v1/deploy",
+      "GET /v1/fork",
+      "GET /v1/generate-image",
+      "GET /v1/message",
+      "GET /v1/agent/contact",
+      // Variant of provision (covered by provision_postgres_project)
+      "POST /v1/projects/create/:tier",
+      // Subdomain lookup (covered by list_subdomains)
+      "GET /v1/subdomains/:name",
+      // REST proxy (covered by rest_query)
+      "GET /rest/v1/:table",
+      "POST /rest/v1/:table",
+      "PATCH /rest/v1/:table",
+      "DELETE /rest/v1/:table",
+      // Auth (handled client-side, not via MCP/CLI)
+      "POST /auth/v1/signup",
+      "POST /auth/v1/token",
+      "POST /auth/v1/token?grant_type=refresh_token",
+      "GET /auth/v1/user",
+      "POST /auth/v1/logout",
+      // Storage signed URLs (niche, not yet implemented)
+      "POST /storage/v1/object/sign/:bucket/*",
+      // Invocation variants (covered by invoke_function)
+      "GET /functions/v1/:name",
+      "PATCH /functions/v1/:name",
+      "DELETE /functions/v1/:name",
+      // Utility endpoints
+      "GET /.well-known/x402",
+      "GET /health",
+      "GET /v1/ping",
+    ]);
+
+    const uncovered = documented.filter(ep => {
+      if (IGNORED_ENDPOINTS.has(ep)) return false;
+      // Check if any SURFACE endpoint matches (normalize param names)
+      return !surfaceEndpoints.some(se => {
+        // Exact match
+        if (se === ep) return true;
+        // Match with different param names: normalize :foo to :param
+        const normDoc = ep.replace(/:[a-z_]+/g, ":param");
+        const normSurf = se.replace(/:[a-z_]+/g, ":param");
+        return normDoc === normSurf;
+      });
+    });
+
+    assert.deepEqual(
+      uncovered,
+      [],
+      `llms.txt has actionable endpoints not in SURFACE. Add them to the SURFACE array in sync.test.ts or to IGNORED_ENDPOINTS if intentionally excluded: ${uncovered.join(", ")}`,
+    );
+  });
+
   it("all SURFACE endpoints appear in llms.txt", () => {
     const missing = SURFACE
       .filter(c => c.endpoint !== "(local)")
       .filter(c => {
         // Strip method prefix and normalize param placeholders for matching.
         // e.g. "POST /v1/projects/:id/renew" → check that "/v1/projects/" and "/renew" appear
-        const path = c.endpoint.replace(/^(GET|POST|PATCH|DELETE)\s+/, "");
+        const path = c.endpoint.replace(/^(GET|POST|PUT|PATCH|DELETE)\s+/, "");
         // Direct match
         if (llmsTxt.includes(path)) return false;
         // Match with params stripped (e.g. /admin/v1/projects/:id/functions → /admin/v1/projects/ + /functions)
