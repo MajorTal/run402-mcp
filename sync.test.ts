@@ -56,6 +56,7 @@ function parseCliCommands(): string[] {
     }
   }
   if (existsSync(join(__dirname, "cli/lib/deploy.mjs"))) cmds.push("deploy");
+  if (existsSync(join(__dirname, "cli/lib/init.mjs"))) cmds.push("init");
   return cmds.sort();
 }
 
@@ -68,6 +69,7 @@ function parseOpenClawCommands(): string[] {
     }
   }
   if (existsSync(join(__dirname, "openclaw/scripts/deploy.mjs"))) cmds.push("deploy");
+  if (existsSync(join(__dirname, "openclaw/scripts/init.mjs"))) cmds.push("init");
   return cmds.sort();
 }
 
@@ -122,6 +124,9 @@ interface Capability {
 }
 
 const SURFACE: Capability[] = [
+  // ── Init (local-only) ──────────────────────────────────────────────────
+  { id: "init",              endpoint: "(local)",                              mcp: null,                            cli: "init",                openclaw: "init" },
+
   // ── Project lifecycle ────────────────────────────────────────────────────
   { id: "get_quote",         endpoint: "POST /projects/v1/quote",                mcp: "get_quote",                    cli: "projects:quote",      openclaw: "projects:quote" },
   { id: "provision",         endpoint: "POST /projects/v1",                      mcp: "provision_postgres_project",    cli: "projects:provision",  openclaw: "projects:provision" },

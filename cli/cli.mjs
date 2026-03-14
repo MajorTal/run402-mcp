@@ -13,6 +13,7 @@ Usage:
   run402 <command> [subcommand] [options]
 
 Commands:
+  init        Set up wallet, funding, and check tier status
   wallet      Manage your x402 wallet (create, fund, balance, status)
   tier        Manage tier subscription (status, set)
   projects    Manage projects (provision, list, query, inspect, delete)
@@ -40,9 +41,9 @@ Examples:
   run402 image generate "a startup mascot, pixel art" --output logo.png
 
 Getting started:
-  1. run402 wallet create    Create a local wallet
-  2. run402 wallet fund      Fund it with test USDC (Base Sepolia faucet)
-  3. run402 deploy ...       Deploy your app — payments handled automatically
+  run402 init               Set up everything in one command
+  run402 tier set prototype  Subscribe to a tier
+  run402 deploy ...          Deploy your app
 `;
 
 if (!cmd || cmd === '--help' || cmd === '-h') {
@@ -51,6 +52,11 @@ if (!cmd || cmd === '--help' || cmd === '-h') {
 }
 
 switch (cmd) {
+  case "init": {
+    const { run } = await import("./lib/init.mjs");
+    await run();
+    break;
+  }
   case "wallet": {
     const { run } = await import("./lib/wallet.mjs");
     await run(sub, rest);
