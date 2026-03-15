@@ -7,10 +7,10 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from "f
 import { join } from "path";
 import { homedir } from "os";
 
-export const CONFIG_DIR = join(homedir(), ".config", "run402");
+export const CONFIG_DIR = process.env.RUN402_CONFIG_DIR || join(homedir(), ".config", "run402");
 export const WALLET_FILE = join(CONFIG_DIR, "wallet.json");
 export const PROJECTS_FILE = join(CONFIG_DIR, "projects.json");
-export const API = "https://api.run402.com";
+export const API = process.env.RUN402_API_BASE || "https://api.run402.com";
 
 export function readWallet() {
   if (!existsSync(WALLET_FILE)) return null;
