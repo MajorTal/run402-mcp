@@ -1,5 +1,4 @@
-import { existsSync } from "fs";
-import { findProject, readWallet, loadProjects, saveProjects, API, WALLET_FILE, PROJECTS_FILE } from "./config.mjs";
+import { findProject, loadProjects, saveProjects, API, PROJECTS_FILE, walletAuthHeaders } from "./config.mjs";
 import { mkdirSync, writeFileSync } from "fs";
 
 const HELP = `run402 apps — Browse and manage the app marketplace
@@ -49,31 +48,14 @@ async function fork(versionId, name, args) {
     if (args[i] === "--tier" && args[i + 1]) opts.tier = args[++i];
     if (args[i] === "--subdomain" && args[i + 1]) opts.subdomain = args[++i];
   }
-  if (!existsSync(WALLET_FILE)) {
-    console.error(JSON.stringify({ status: "error", message: "No wallet found. Run: run402 wallet create && run402 wallet fund" }));
-    process.exit(1);
-  }
-
-  const wallet = readWallet();
-  const { privateKeyToAccount } = await import("viem/accounts");
-  const { createPublicClient, http } = await import("viem");
-  const { baseSepolia } = await import("viem/chains");
-  const { x402Client, wrapFetchWithPayment } = await import("@x402/fetch");
-  const { ExactEvmScheme } = await import("@x402/evm/exact/client");
-  const { toClientEvmSigner } = await import("@x402/evm");
-  const account = privateKeyToAccount(wallet.privateKey);
-  const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
-  const signer = toClientEvmSigner(account, publicClient);
-  const client = new x402Client();
-  client.register("eip155:84532", new ExactEvmScheme(signer));
-  const fetchPaid = wrapFetchWithPayment(fetch, client);
+  const authHeaders = await walletAuthHeaders();
 
   const body = { version_id: versionId, name };
   if (opts.subdomain) body.subdomain = opts.subdomain;
 
-  const res = await fetchPaid(`${API}/fork/v1`, {
+  const res = await fetch(`${API}/fork/v1`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify(body),
   });
   const data = await res.json();

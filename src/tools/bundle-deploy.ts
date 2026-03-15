@@ -2,6 +2,7 @@ import { z } from "zod";
 import { apiRequest } from "../client.js";
 import { saveProject } from "../keystore.js";
 import { formatApiError } from "../errors.js";
+import { requireWalletAuth } from "../wallet-auth.js";
 
 export const bundleDeploySchema = {
   name: z.string().describe("App name (used as project name and default subdomain)"),
@@ -65,8 +66,12 @@ export async function handleBundleDeploy(args: {
   site?: Array<{ file: string; data: string; encoding?: string }>;
   subdomain?: string;
 }): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+  const auth = requireWalletAuth();
+  if ("error" in auth) return auth.error;
+
   const res = await apiRequest("/deploy/v1", {
     method: "POST",
+    headers: { ...auth.headers },
     body: {
       name: args.name,
       migrations: args.migrations,
@@ -77,33 +82,6 @@ export async function handleBundleDeploy(args: {
       subdomain: args.subdomain,
     },
   });
-
-  if (res.is402) {
-    const body = res.body as Record<string, unknown>;
-    const lines = [
-      `## Payment Required`,
-      ``,
-      `To bundle-deploy **${args.name}**, an x402 payment is needed.`,
-      ``,
-    ];
-    if (body.x402) {
-      lines.push(`**Payment details:**`);
-      lines.push("```json");
-      lines.push(JSON.stringify(body.x402, null, 2));
-      lines.push("```");
-    } else {
-      lines.push(`**Server response:**`);
-      lines.push("```json");
-      lines.push(JSON.stringify(body, null, 2));
-      lines.push("```");
-    }
-    lines.push(``);
-    lines.push(
-      `The user's wallet or payment agent must send the required amount. ` +
-      `Once payment is confirmed, retry this tool call.`,
-    );
-    return { content: [{ type: "text", text: lines.join("\n") }] };
-  }
 
   if (!res.ok) return formatApiError(res, "deploying bundle");
 

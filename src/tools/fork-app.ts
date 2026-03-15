@@ -2,14 +2,11 @@ import { z } from "zod";
 import { apiRequest } from "../client.js";
 import { saveProject } from "../keystore.js";
 import { formatApiError } from "../errors.js";
+import { requireWalletAuth } from "../wallet-auth.js";
 
 export const forkAppSchema = {
   version_id: z.string().describe("The app version ID to fork (from browse_apps)"),
   name: z.string().describe("Name for the new forked project"),
-  tier: z
-    .enum(["prototype", "hobby", "team"])
-    .default("prototype")
-    .describe("Database tier: prototype ($0.10/7d), hobby ($5/30d), team ($20/30d)"),
   subdomain: z
     .string()
     .optional()
@@ -19,46 +16,20 @@ export const forkAppSchema = {
 export async function handleForkApp(args: {
   version_id: string;
   name: string;
-  tier?: string;
   subdomain?: string;
 }): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
-  const tier = args.tier || "prototype";
+  const auth = requireWalletAuth();
+  if ("error" in auth) return auth.error;
 
   const res = await apiRequest("/fork/v1", {
     method: "POST",
+    headers: { ...auth.headers },
     body: {
       version_id: args.version_id,
       name: args.name,
       subdomain: args.subdomain,
     },
   });
-
-  if (res.is402) {
-    const body = res.body as Record<string, unknown>;
-    const lines = [
-      `## Payment Required`,
-      ``,
-      `To fork this app (tier: **${tier}**), an x402 payment is needed.`,
-      ``,
-    ];
-    if (body.x402) {
-      lines.push(`**Payment details:**`);
-      lines.push("```json");
-      lines.push(JSON.stringify(body.x402, null, 2));
-      lines.push("```");
-    } else {
-      lines.push(`**Server response:**`);
-      lines.push("```json");
-      lines.push(JSON.stringify(body, null, 2));
-      lines.push("```");
-    }
-    lines.push(``);
-    lines.push(
-      `The user's wallet or payment agent must send the required amount. ` +
-      `Once payment is confirmed, retry this tool call.`,
-    );
-    return { content: [{ type: "text", text: lines.join("\n") }] };
-  }
 
   if (!res.ok) return formatApiError(res, "forking app");
 

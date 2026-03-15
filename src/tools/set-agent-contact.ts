@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { apiRequest } from "../client.js";
 import { formatApiError } from "../errors.js";
+import { requireWalletAuth } from "../wallet-auth.js";
 
 export const setAgentContactSchema = {
   name: z.string().describe("Agent name"),
@@ -17,16 +18,14 @@ export async function handleSetAgentContact(args: {
   if (args.email) body.email = args.email;
   if (args.webhook) body.webhook = args.webhook;
 
+  const auth = requireWalletAuth();
+  if ("error" in auth) return auth.error;
+
   const res = await apiRequest("/agent/v1/contact", {
     method: "POST",
+    headers: { ...auth.headers },
     body,
   });
-
-  if (res.is402) {
-    return {
-      content: [{ type: "text", text: `## Auth Required\n\nRegistering agent contact requires wallet auth.\n\n${JSON.stringify(res.body, null, 2)}` }],
-    };
-  }
 
   if (!res.ok) return formatApiError(res, "setting agent contact");
 

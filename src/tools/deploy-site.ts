@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { apiRequest } from "../client.js";
 import { formatApiError } from "../errors.js";
+import { requireWalletAuth } from "../wallet-auth.js";
 
 export const deploySiteSchema = {
   name: z
@@ -34,8 +35,12 @@ export async function handleDeploySite(args: {
   target?: string;
   files: Array<{ file: string; data: string; encoding?: string }>;
 }): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+  const auth = requireWalletAuth();
+  if ("error" in auth) return auth.error;
+
   const res = await apiRequest("/deployments/v1", {
     method: "POST",
+    headers: { ...auth.headers },
     body: {
       name: args.name,
       project: args.project,
@@ -43,33 +48,6 @@ export async function handleDeploySite(args: {
       files: args.files,
     },
   });
-
-  if (res.is402) {
-    const body = res.body as Record<string, unknown>;
-    const lines = [
-      `## Payment Required`,
-      ``,
-      `To deploy a static site, an active tier subscription is needed.`,
-      ``,
-    ];
-    if (body.x402) {
-      lines.push(`**Payment details:**`);
-      lines.push("```json");
-      lines.push(JSON.stringify(body.x402, null, 2));
-      lines.push("```");
-    } else {
-      lines.push(`**Server response:**`);
-      lines.push("```json");
-      lines.push(JSON.stringify(body, null, 2));
-      lines.push("```");
-    }
-    lines.push(``);
-    lines.push(
-      `The user's wallet or payment agent must send the required amount. ` +
-      `Once payment is confirmed, retry this tool call.`,
-    );
-    return { content: [{ type: "text", text: lines.join("\n") }] };
-  }
 
   if (!res.ok) return formatApiError(res, "deploying site");
 

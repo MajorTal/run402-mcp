@@ -1,11 +1,33 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
-import { handleTierStatus } from "./tier-status.js";
+
+let walletAuthReturn: any = {
+  headers: {
+    "X-Run402-Wallet": "0xtest",
+    "X-Run402-Signature": "0xsig",
+    "X-Run402-Timestamp": "1234567890",
+  },
+};
+
+mock.module("../wallet-auth.js", {
+  namedExports: {
+    requireWalletAuth: () => walletAuthReturn,
+  },
+});
+
+const { handleTierStatus } = await import("./tier-status.js");
 
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
   process.env.RUN402_API_BASE = "https://test-api.run402.com";
+  walletAuthReturn = {
+    headers: {
+      "X-Run402-Wallet": "0xtest",
+      "X-Run402-Signature": "0xsig",
+      "X-Run402-Timestamp": "1234567890",
+    },
+  };
 });
 
 afterEach(() => {
@@ -61,5 +83,18 @@ describe("tier_status tool", () => {
 
     const result = await handleTierStatus({} as Record<string, never>);
     assert.equal(result.isError, true);
+  });
+
+  it("returns wallet auth error when no wallet configured", async () => {
+    walletAuthReturn = {
+      error: {
+        content: [{ type: "text", text: "Error: No wallet configured." }],
+        isError: true,
+      },
+    };
+
+    const result = await handleTierStatus({} as Record<string, never>);
+    assert.equal(result.isError, true);
+    assert.ok(result.content[0]!.text.includes("No wallet configured"));
   });
 });

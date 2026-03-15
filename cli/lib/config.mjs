@@ -36,6 +36,16 @@ export function saveProjects(projects) {
   writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2), { mode: 0o600 });
 }
 
+export async function walletAuthHeaders() {
+  const w = readWallet();
+  if (!w) { console.error(JSON.stringify({ status: "error", message: "No wallet found. Run: run402 wallet create" })); process.exit(1); }
+  const { privateKeyToAccount } = await import("viem/accounts");
+  const account = privateKeyToAccount(w.privateKey);
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const signature = await account.signMessage({ message: `run402:${timestamp}` });
+  return { "X-Run402-Wallet": account.address, "X-Run402-Signature": signature, "X-Run402-Timestamp": timestamp };
+}
+
 export function findProject(id) {
   const p = loadProjects().find(p => p.project_id === id);
   if (!p) { console.error(`Project ${id} not found in local registry.`); process.exit(1); }

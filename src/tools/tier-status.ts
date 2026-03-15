@@ -1,13 +1,20 @@
 import { z } from "zod";
 import { apiRequest } from "../client.js";
 import { formatApiError } from "../errors.js";
+import { requireWalletAuth } from "../wallet-auth.js";
 
 export const tierStatusSchema = {};
 
 export async function handleTierStatus(
   _args: Record<string, never>,
 ): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
-  const res = await apiRequest("/tiers/v1/status", { method: "GET" });
+  const auth = requireWalletAuth();
+  if ("error" in auth) return auth.error;
+
+  const res = await apiRequest("/tiers/v1/status", {
+    method: "GET",
+    headers: { ...auth.headers },
+  });
 
   if (!res.ok) return formatApiError(res, "checking tier status");
 

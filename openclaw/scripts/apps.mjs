@@ -9,8 +9,8 @@
  *   node apps.mjs versions <project_id>
  */
 
-import { existsSync, mkdirSync, writeFileSync } from "fs";
-import { findProject, readWallet, loadProjects, API, WALLET_FILE, PROJECTS_FILE } from "./config.mjs";
+import { mkdirSync, writeFileSync } from "fs";
+import { findProject, walletAuthHeaders, loadProjects, API, PROJECTS_FILE } from "./config.mjs";
 
 async function browse(extraArgs) {
   let url = `${API}/apps/v1`;
@@ -31,31 +31,14 @@ async function fork(versionId, name, extraArgs) {
     if (extraArgs[i] === "--tier" && extraArgs[i + 1]) opts.tier = extraArgs[++i];
     if (extraArgs[i] === "--subdomain" && extraArgs[i + 1]) opts.subdomain = extraArgs[++i];
   }
-  if (!existsSync(WALLET_FILE)) {
-    console.error(JSON.stringify({ status: "error", message: "No wallet found. Run: node wallet.mjs create && node wallet.mjs fund" }));
-    process.exit(1);
-  }
-
-  const wallet = readWallet();
-  const { privateKeyToAccount } = await import("viem/accounts");
-  const { createPublicClient, http } = await import("viem");
-  const { baseSepolia } = await import("viem/chains");
-  const { x402Client, wrapFetchWithPayment } = await import("@x402/fetch");
-  const { ExactEvmScheme } = await import("@x402/evm/exact/client");
-  const { toClientEvmSigner } = await import("@x402/evm");
-  const account = privateKeyToAccount(wallet.privateKey);
-  const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
-  const signer = toClientEvmSigner(account, publicClient);
-  const client = new x402Client();
-  client.register("eip155:84532", new ExactEvmScheme(signer));
-  const fetchPaid = wrapFetchWithPayment(fetch, client);
+  const authHeaders = await walletAuthHeaders();
 
   const body = { version_id: versionId, name };
   if (opts.subdomain) body.subdomain = opts.subdomain;
 
-  const res = await fetchPaid(`${API}/fork/v1`, {
+  const res = await fetch(`${API}/fork/v1`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify(body),
   });
   const data = await res.json();

@@ -1,5 +1,5 @@
-import { findProject, loadProjects, saveProjects, readWallet, API, WALLET_FILE, PROJECTS_FILE } from "./config.mjs";
-import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { findProject, loadProjects, saveProjects, API, PROJECTS_FILE, walletAuthHeaders } from "./config.mjs";
+import { mkdirSync, writeFileSync } from "fs";
 
 const HELP = `run402 projects — Manage your deployed Run402 projects
 
@@ -36,26 +36,6 @@ Notes:
   - RLS templates: user_owns_rows, public_read, public_read_write
 `;
 
-async function setupPaidFetch() {
-  if (!existsSync(WALLET_FILE)) {
-    console.error(JSON.stringify({ status: "error", message: "No wallet found. Run: run402 wallet create && run402 wallet fund" }));
-    process.exit(1);
-  }
-  const wallet = readWallet();
-  const { privateKeyToAccount } = await import("viem/accounts");
-  const { createPublicClient, http } = await import("viem");
-  const { baseSepolia } = await import("viem/chains");
-  const { x402Client, wrapFetchWithPayment } = await import("@x402/fetch");
-  const { ExactEvmScheme } = await import("@x402/evm/exact/client");
-  const { toClientEvmSigner } = await import("@x402/evm");
-  const account = privateKeyToAccount(wallet.privateKey);
-  const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
-  const signer = toClientEvmSigner(account, publicClient);
-  const client = new x402Client();
-  client.register("eip155:84532", new ExactEvmScheme(signer));
-  return wrapFetchWithPayment(fetch, client);
-}
-
 async function quote() {
   const res = await fetch(`${API}/tiers/v1`);
   const data = await res.json();
@@ -69,12 +49,12 @@ async function provision(args) {
     if (args[i] === "--tier" && args[i + 1]) opts.tier = args[++i];
     if (args[i] === "--name" && args[i + 1]) opts.name = args[++i];
   }
-  const fetchPaid = await setupPaidFetch();
+  const authHeaders = await walletAuthHeaders();
   const body = { tier: opts.tier };
   if (opts.name) body.name = opts.name;
-  const res = await fetchPaid(`${API}/projects/v1`, {
+  const res = await fetch(`${API}/projects/v1`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify(body),
   });
   const data = await res.json();

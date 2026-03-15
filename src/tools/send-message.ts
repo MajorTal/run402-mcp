@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { apiRequest } from "../client.js";
 import { formatApiError } from "../errors.js";
+import { requireWalletAuth } from "../wallet-auth.js";
 
 export const sendMessageSchema = {
   message: z.string().describe("Message to send to the Run402 developers"),
@@ -9,16 +10,14 @@ export const sendMessageSchema = {
 export async function handleSendMessage(args: {
   message: string;
 }): Promise<{ content: Array<{ type: "text"; text: string }>; isError?: boolean }> {
+  const auth = requireWalletAuth();
+  if ("error" in auth) return auth.error;
+
   const res = await apiRequest("/message/v1", {
     method: "POST",
+    headers: { ...auth.headers },
     body: { message: args.message },
   });
-
-  if (res.is402) {
-    return {
-      content: [{ type: "text", text: `## Auth Required\n\nSending a message requires wallet auth.\n\n${JSON.stringify(res.body, null, 2)}` }],
-    };
-  }
 
   if (!res.ok) return formatApiError(res, "sending message");
 

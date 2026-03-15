@@ -1,10 +1,25 @@
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { handleProvision } from "./provision.js";
-import { getProject, loadKeyStore } from "../keystore.js";
+
+let walletAuthReturn: any = {
+  headers: {
+    "X-Run402-Wallet": "0xtest",
+    "X-Run402-Signature": "0xsig",
+    "X-Run402-Timestamp": "1234567890",
+  },
+};
+
+mock.module("../wallet-auth.js", {
+  namedExports: {
+    requireWalletAuth: () => walletAuthReturn,
+  },
+});
+
+const { handleProvision } = await import("./provision.js");
+const { getProject } = await import("../keystore.js");
 
 const originalFetch = globalThis.fetch;
 let tempDir: string;
@@ -15,6 +30,13 @@ beforeEach(() => {
   storePath = join(tempDir, "projects.json");
   process.env.RUN402_CONFIG_DIR = tempDir;
   process.env.RUN402_API_BASE = "https://test-api.run402.com";
+  walletAuthReturn = {
+    headers: {
+      "X-Run402-Wallet": "0xtest",
+      "X-Run402-Signature": "0xsig",
+      "X-Run402-Timestamp": "1234567890",
+    },
+  };
 });
 
 afterEach(() => {
@@ -51,20 +73,17 @@ describe("provision tool", () => {
     assert.equal(stored!.tier, "prototype");
   });
 
-  it("returns needs_allowance text (NOT isError) on 402", async () => {
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          x402: { price: "$0.10", network: "base-sepolia", address: "0xabc" },
-        }),
-        { status: 402, headers: { "Content-Type": "application/json" } },
-      )) as typeof fetch;
+  it("returns wallet auth error when no wallet configured", async () => {
+    walletAuthReturn = {
+      error: {
+        content: [{ type: "text", text: "Error: No wallet configured." }],
+        isError: true,
+      },
+    };
 
     const result = await handleProvision({ tier: "prototype" });
-    // 402 should NOT be an error — the LLM should reason about payment
-    assert.equal(result.isError, undefined);
-    assert.ok(result.content[0]!.text.includes("Payment Required"));
-    assert.ok(result.content[0]!.text.includes("$0.10"));
+    assert.equal(result.isError, true);
+    assert.ok(result.content[0]!.text.includes("No wallet configured"));
   });
 
   it("returns isError on 400 (invalid tier)", async () => {

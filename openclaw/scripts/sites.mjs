@@ -7,8 +7,8 @@
  *   cat manifest.json | node sites.mjs deploy --name <name>
  */
 
-import { readFileSync, existsSync } from "fs";
-import { readWallet, API, WALLET_FILE } from "./config.mjs";
+import { readFileSync } from "fs";
+import { walletAuthHeaders, API } from "./config.mjs";
 
 async function readStdin() {
   const chunks = [];
@@ -25,33 +25,16 @@ async function deploy(extraArgs) {
     if (extraArgs[i] === "--target" && extraArgs[i + 1]) opts.target = extraArgs[++i];
   }
   if (!opts.name) { console.error(JSON.stringify({ status: "error", message: "Missing --name <name>" })); process.exit(1); }
-  if (!existsSync(WALLET_FILE)) {
-    console.error(JSON.stringify({ status: "error", message: "No wallet found. Run: node wallet.mjs create && node wallet.mjs fund" }));
-    process.exit(1);
-  }
+  const authHeaders = await walletAuthHeaders();
 
   const manifest = opts.manifest ? JSON.parse(readFileSync(opts.manifest, "utf-8")) : JSON.parse(await readStdin());
   const body = { name: opts.name, files: manifest.files };
   if (opts.project) body.project = opts.project;
   if (opts.target) body.target = opts.target;
 
-  const wallet = readWallet();
-  const { privateKeyToAccount } = await import("viem/accounts");
-  const { createPublicClient, http } = await import("viem");
-  const { baseSepolia } = await import("viem/chains");
-  const { x402Client, wrapFetchWithPayment } = await import("@x402/fetch");
-  const { ExactEvmScheme } = await import("@x402/evm/exact/client");
-  const { toClientEvmSigner } = await import("@x402/evm");
-  const account = privateKeyToAccount(wallet.privateKey);
-  const publicClient = createPublicClient({ chain: baseSepolia, transport: http() });
-  const signer = toClientEvmSigner(account, publicClient);
-  const client = new x402Client();
-  client.register("eip155:84532", new ExactEvmScheme(signer));
-  const fetchPaid = wrapFetchWithPayment(fetch, client);
-
-  const res = await fetchPaid(`${API}/deployments/v1`, {
+  const res = await fetch(`${API}/deployments/v1`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders },
     body: JSON.stringify(body),
   });
   const data = await res.json();

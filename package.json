@@ -17,7 +17,7 @@
     "start": "node dist/index.js",
     "test:skill": "node --test --import tsx SKILL.test.ts",
     "test:sync": "node --test --import tsx sync.test.ts",
-    "test": "node --test --import tsx SKILL.test.ts sync.test.ts src/**/*.test.ts"
+    "test": "node --experimental-test-module-mocks --test --import tsx SKILL.test.ts sync.test.ts src/**/*.test.ts"
   },
   "keywords": [
     "mcp",
@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "zod": "^3.24.0"
   },
