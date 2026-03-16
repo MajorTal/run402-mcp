@@ -1,0 +1,12 @@
+{
+  "name": "kychee-com/run402",
+  "description": "MCP server for Run402 — AI-native Postgres + REST + auth + storage + static sites. Pay with x402 USDC on Base. No signups.",
+  "accepts": [
+    {
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "address": "YOUR_WALLET_ADDRESS"
+    }
+  ],
+  "resources": []
+}
