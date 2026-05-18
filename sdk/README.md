@@ -54,7 +54,7 @@ const r = new Run402({
 
 The `CredentialsProvider` interface has two required methods (`getAuth`, `getProject`) plus optional ones (`saveProject`, `removeProject`, `setActiveProject`, `readAllowance`, `saveAllowance`, …) for hosts that want full sticky-default behavior.
 
-## Namespaces (20)
+## Namespaces (21)
 
 | Namespace | Highlights |
 |---|---|
@@ -65,6 +65,7 @@ The `CredentialsProvider` interface has two required methods (`getAuth`, `getPro
 | `r.project(id).sites` | `deployDir` — Node entry only (`@run402/sdk/node`); thin wrapper over `r.project(id).apply({ site: dir(...) })` |
 | `r.project(id).assets` | `put` (single asset), `putMany`, `uploadDir` (Node, additive), `syncDir` (Node, destructive only with `prune: true` + confirm token), `prepareDir` (returns `{ manifest, applySlice }` for pre-commit URL injection), `get`, `ls`, `rm`, `sign`, `diagnoseUrl`, `waitFresh`, `diff`. Returns `AssetRef` (single) or `AssetManifest` (batch). |
 | `functions` | `deploy`, `invoke`, `logs`, `update`, `list`, `delete` |
+| `jobs` | `submit`, `get`, `logs`, `cancel` for fixed platform-managed jobs |
 | `secrets` | `set`, `list`, `delete` |
 | `subdomains` | `claim`, `list`, `delete` (most agents declare subdomains in `r.project(id).apply({ subdomains: { set: [...] } })` instead) |
 | `domains` | `add`, `list`, `status`, `remove` |

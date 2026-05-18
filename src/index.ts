@@ -68,6 +68,16 @@ import { deleteFunctionSchema, handleDeleteFunction } from "./tools/delete-funct
 import { updateFunctionSchema, handleUpdateFunction } from "./tools/update-function.js";
 import { listSecretsSchema, handleListSecrets } from "./tools/list-secrets.js";
 import { deleteSecretSchema, handleDeleteSecret } from "./tools/delete-secret.js";
+import {
+  handleJobsCancel,
+  handleJobsGet,
+  handleJobsLogs,
+  handleJobsSubmit,
+  jobsCancelSchema,
+  jobsGetSchema,
+  jobsLogsSchema,
+  jobsSubmitSchema,
+} from "./tools/jobs.js";
 
 // New tools — subdomains & projects
 import { listSubdomainsSchema, handleListSubdomains } from "./tools/list-subdomains.js";
@@ -372,6 +382,36 @@ server.tool(
   "Delete a secret from a project.",
   deleteSecretSchema,
   async (args) => handleDeleteSecret(args),
+);
+
+// ─── Managed jobs tools ────────────────────────────────────────────────────
+
+server.tool(
+  "jobs_submit",
+  "Submit a fixed platform-managed job. The request must match the gateway jobs API shape: job_type, input with input.json, and max_cost_usd_micros. The SDK supplies the required idempotency header.",
+  jobsSubmitSchema,
+  async (args) => handleJobsSubmit(args),
+);
+
+server.tool(
+  "jobs_get",
+  "Get a managed job run by id.",
+  jobsGetSchema,
+  async (args) => handleJobsGet(args),
+);
+
+server.tool(
+  "jobs_logs",
+  "Read recent runner logs for a managed job. Use tail to cap entries and since for an epoch millisecond lower bound.",
+  jobsLogsSchema,
+  async (args) => handleJobsLogs(args),
+);
+
+server.tool(
+  "jobs_cancel",
+  "Cancel a queued or running managed job.",
+  jobsCancelSchema,
+  async (args) => handleJobsCancel(args),
 );
 
 // ─── Deployment & subdomain tools ───────────────────────────────────────────

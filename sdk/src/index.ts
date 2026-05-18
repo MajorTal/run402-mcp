@@ -28,6 +28,7 @@ import { Contracts } from "./namespaces/contracts.js";
 import { Admin } from "./namespaces/admin.js";
 import { Deploy } from "./namespaces/deploy.js";
 import { Ci } from "./namespaces/ci.js";
+import { Jobs } from "./namespaces/jobs.js";
 import type { ContentSource, FileSet } from "./namespaces/deploy.types.js";
 import { ScopedRun402 } from "./scoped.js";
 import { LocalError } from "./errors.js";
@@ -74,6 +75,7 @@ export class Run402 {
    */
   readonly _applyEngine: Deploy;
   readonly ci: Ci;
+  readonly jobs: Jobs;
 
   readonly #client: Client;
 
@@ -136,6 +138,7 @@ export class Run402 {
     this.admin = new Admin(client);
     this._applyEngine = new Deploy(client);
     this.ci = new Ci(client);
+    this.jobs = new Jobs(client);
   }
 
   /**
@@ -303,6 +306,7 @@ export type { ByteReader } from "./namespaces/deploy.js";
 export type * from "./namespaces/domains.js";
 export type * from "./namespaces/email.js";
 export type * from "./namespaces/functions.types.js";
+export type * from "./namespaces/jobs.js";
 export type * from "./namespaces/projects.types.js";
 export type * from "./namespaces/secrets.js";
 export type * from "./namespaces/sender-domain.js";

@@ -27,6 +27,7 @@ Commands:
   projects    Manage projects (provision, list, query, inspect, delete)
   deploy      Unified deploy operations (requires active tier)
   ci          Link GitHub Actions OIDC deploy bindings
+  jobs        Submit and inspect fixed platform-managed jobs
   functions   Manage serverless functions (deploy, invoke, logs, list, delete)
   secrets     Manage project secrets (set, list, delete)
   assets      Direct-to-S3 asset storage (put, get, ls, rm, sign, diagnose) — up to 5 TiB
@@ -52,6 +53,7 @@ Examples:
   run402 allowance create
   run402 allowance fund
   run402 deploy apply --manifest app.json
+  run402 jobs submit --file job.json
   run402 projects list
   run402 projects sql <project_id> "SELECT * FROM users LIMIT 5"
   run402 functions deploy <project_id> my-fn --file handler.ts
@@ -126,6 +128,11 @@ switch (cmd) {
   }
   case "ci": {
     const { run } = await import("./lib/ci.mjs");
+    await run(sub, rest);
+    break;
+  }
+  case "jobs": {
+    const { run } = await import("./lib/jobs.mjs");
     await run(sub, rest);
     break;
   }

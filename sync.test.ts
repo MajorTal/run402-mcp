@@ -61,7 +61,7 @@ function parseSubcommands(filePath: string): string[] {
 /** Parse CLI commands as "module:subcommand" pairs */
 function parseCliCommands(): string[] {
   const cmds: string[] = [];
-  for (const mod of ["allowance", "tier", "projects", "image", "storage", "assets", "cdn", "functions", "secrets", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci"]) {
+  for (const mod of ["allowance", "tier", "projects", "image", "storage", "assets", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci"]) {
     for (const sub of parseSubcommands(join(__dirname, "cli/lib", `${mod}.mjs`))) {
       cmds.push(`${mod}:${sub}`);
     }
@@ -77,7 +77,7 @@ function parseCliCommands(): string[] {
 /** Parse OpenClaw commands as "module:subcommand" pairs */
 function parseOpenClawCommands(): string[] {
   const cmds: string[] = [];
-  for (const mod of ["allowance", "tier", "projects", "image", "storage", "assets", "cdn", "functions", "secrets", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci"]) {
+  for (const mod of ["allowance", "tier", "projects", "image", "storage", "assets", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci"]) {
     for (const sub of parseSubcommands(join(__dirname, "openclaw/scripts", `${mod}.mjs`))) {
       cmds.push(`${mod}:${sub}`);
     }
@@ -196,6 +196,12 @@ const SURFACE: Capability[] = [
   { id: "set_secret",        endpoint: "POST /projects/v1/admin/:id/secrets",        mcp: "set_secret",    cli: "secrets:set",    openclaw: "secrets:set" },
   { id: "list_secrets",      endpoint: "GET /projects/v1/admin/:id/secrets",         mcp: "list_secrets",  cli: "secrets:list",   openclaw: "secrets:list" },
   { id: "delete_secret",     endpoint: "DELETE /projects/v1/admin/:id/secrets/:key", mcp: "delete_secret", cli: "secrets:delete", openclaw: "secrets:delete" },
+
+  // ── Managed jobs ────────────────────────────────────────────────────────
+  { id: "jobs_submit",       endpoint: "POST /jobs/v1/runs",                 mcp: "jobs_submit", cli: "jobs:submit", openclaw: "jobs:submit" },
+  { id: "jobs_get",          endpoint: "GET /jobs/v1/runs/:job_id",          mcp: "jobs_get",    cli: "jobs:get",    openclaw: "jobs:get" },
+  { id: "jobs_logs",         endpoint: "GET /jobs/v1/runs/:job_id/logs",     mcp: "jobs_logs",   cli: "jobs:logs",   openclaw: "jobs:logs" },
+  { id: "jobs_cancel",       endpoint: "DELETE /jobs/v1/runs/:job_id",       mcp: "jobs_cancel", cli: "jobs:cancel", openclaw: "jobs:cancel" },
 
   // ── Sites / Subdomains ───────────────────────────────────────────────────
   { id: "deploy_site",       endpoint: "POST /deploy/v2/plans",             mcp: "deploy_site",       cli: "sites:deploy",       openclaw: "sites:deploy" },
@@ -394,6 +400,12 @@ const SDK_BY_CAPABILITY: Record<string, string | null> = {
   set_secret: "secrets.set",
   list_secrets: "secrets.list",
   delete_secret: "secrets.delete",
+
+  // Managed jobs
+  jobs_submit: "jobs.submit",
+  jobs_get: "jobs.get",
+  jobs_logs: "jobs.logs",
+  jobs_cancel: "jobs.cancel",
 
   // Sites / Subdomains
   deploy_site: null, // MCP stages files to a temp dir and composes deployDir

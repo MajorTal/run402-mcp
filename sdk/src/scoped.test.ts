@@ -446,6 +446,7 @@ describe("ScopedRun402 drift protection", () => {
     // them on the prototype, so list them here so the drift test ignores them.
     email: new Set(["resolveMailbox", "listMailboxes"]),
     functions: new Set(),
+    jobs: new Set(),
     secrets: new Set(),
     senderDomain: new Set(),
     subdomains: new Set(),
@@ -473,6 +474,7 @@ describe("ScopedRun402 drift protection", () => {
     "_applyEngine",
     "email",
     "functions",
+    "jobs",
     "apps",
     "projects",
     "sites", // Sites class is empty — intentionally not exposed on ScopedRun402
@@ -494,6 +496,7 @@ describe("ScopedRun402 drift protection", () => {
       "domains",
       "email",
       "functions",
+      "jobs",
       "secrets",
       "senderDomain",
       "subdomains",

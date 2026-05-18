@@ -499,6 +499,17 @@ run402 secrets list   <id>
 run402 secrets delete <id> STALE_KEY
 ```
 
+## Jobs
+
+Fixed platform-managed jobs. This is not arbitrary Docker execution: submit the gateway-shaped request with `job_type`, `input["input.json"]`, and `max_cost_usd_micros`, then inspect status/logs or cancel.
+
+```bash
+run402 jobs submit --file job.json --project <id>
+run402 jobs get    <job_id> --project <id>
+run402 jobs logs   <job_id> --project <id> --tail 100
+run402 jobs cancel <job_id> --project <id>
+```
+
 ## Email
 
 One mailbox per project at `<slug>@mail.run402.com`. Optionally bring your own domain.
@@ -814,7 +825,7 @@ Top-level command groups:
 ```
 run402 init | status | message | service
 run402 allowance   | tier      | projects | sites      | subdomains
-run402 domains     | functions | secrets  | blob       | cdn
+run402 domains     | functions | secrets  | jobs       | assets     | cdn
 run402 email       | sender-domain | auth | apps       | image
 run402 deploy      | ai        | contracts | billing   | agent
 ```

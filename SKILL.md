@@ -316,6 +316,7 @@ No `route_scopes` means no CI route-declaration authority. With route scopes, CI
 - **`update_function`** — change schedule / timeout / memory without redeploying code.
 - **`list_functions`** / **`delete_function`** — list / remove.
 - **`set_secret`** / **`list_secrets`** / **`delete_secret`** — `process.env` secrets injected into every function. Values are write-only; `list_secrets` returns keys and timestamps only. Deploy specs use `secrets.require[]` as a dependency gate, not as a value carrier or per-function allowlist.
+- **`jobs_submit`** / **`jobs_get`** / **`jobs_logs`** / **`jobs_cancel`** — fixed platform-managed jobs. Submit the gateway-shaped request with `job_type`, `input["input.json"]`, and `max_cost_usd_micros`; this is not arbitrary Docker execution.
 
 Function authoring limits per tier: prototype 10s / 128 MB / 1 scheduled fn / 15 min, hobby 30s / 256 MB / 3 / 5 min, team 60s / 512 MB / 10 / 1 min. Deploy preflights literal unified-deploy function values before plan/upload and returns structured `BAD_FIELD` details.
 

@@ -1,0 +1,150 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+
+import { ProjectNotFound } from "../errors.js";
+import { Run402 } from "../index.js";
+import type { CredentialsProvider } from "../credentials.js";
+import type { ManagedJobSubmitRequest } from "./jobs.js";
+
+function creds(): CredentialsProvider {
+  return {
+    async getAuth() {
+      return { "SIGN-IN-WITH-X": "t" };
+    },
+    async getProject(id) {
+      if (id === "prj_k") return { anon_key: "a", service_key: "s" };
+      return null;
+    },
+  };
+}
+
+interface Call {
+  url: string;
+  method: string;
+  headers: Record<string, string>;
+  body: unknown;
+}
+
+function mockFetch(h: (c: Call) => Response): { fetch: typeof globalThis.fetch; calls: Call[] } {
+  const calls: Call[] = [];
+  const fetch: typeof globalThis.fetch = async (input, init) => {
+    const call: Call = {
+      url: String(input),
+      method: init?.method ?? "GET",
+      headers: (init?.headers ?? {}) as Record<string, string>,
+      body: init?.body ?? null,
+    };
+    calls.push(call);
+    return h(call);
+  };
+  return { fetch, calls };
+}
+
+function sdk(f: typeof globalThis.fetch): Run402 {
+  return new Run402({ apiBase: "https://api.test", credentials: creds(), fetch: f });
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function submitRequest(): ManagedJobSubmitRequest {
+  return {
+    job_type: "kysigned.fflonk_prove.v0_17_0",
+    input: { "input.json": { envelopeId: "env_1" } },
+    max_cost_usd_micros: 50_000,
+  };
+}
+
+describe("jobs", () => {
+  it("submit POSTs the gateway request with service bearer and generated idempotency key", async () => {
+    const response = {
+      job_id: "job_123",
+      job_type: "kysigned.fflonk_prove.v0_17_0",
+      status: "queued",
+      created_at: "2026-05-18T00:00:00.000Z",
+    };
+    const { fetch, calls } = mockFetch(() => json(response, 202));
+
+    const result = await sdk(fetch).jobs.submit("prj_k", submitRequest());
+
+    assert.deepEqual(result, response);
+    assert.equal(calls[0]!.url, "https://api.test/jobs/v1/runs");
+    assert.equal(calls[0]!.method, "POST");
+    assert.equal(calls[0]!.headers.Authorization, "Bearer s");
+    assert.match(calls[0]!.headers["Idempotency-Key"], /^job-/);
+    assert.deepEqual(JSON.parse(calls[0]!.body as string), submitRequest());
+  });
+
+  it("get reads a job run by id", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({
+        job_id: "job_123",
+        job_type: "kysigned.fflonk_prove.v0_17_0",
+        status: "running",
+        created_at: "2026-05-18T00:00:00.000Z",
+      }),
+    );
+
+    const result = await sdk(fetch).jobs.get("prj_k", "job_123");
+
+    assert.equal(result.status, "running");
+    assert.equal(calls[0]!.url, "https://api.test/jobs/v1/runs/job_123");
+    assert.equal(calls[0]!.method, "GET");
+    assert.equal(calls[0]!.headers.Authorization, "Bearer s");
+  });
+
+  it("logs passes tail and since as gateway query params", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({
+        logs: [
+          {
+            timestamp: "2026-05-18T00:00:00.000Z",
+            message: "started",
+            log_stream_name: "stream",
+            event_id: "evt_1",
+          },
+        ],
+      }),
+    );
+
+    const result = await sdk(fetch).jobs.logs("prj_k", "job_123", {
+      tail: 10,
+      since: 1_710_000_000_000,
+    });
+
+    assert.equal(result.logs.length, 1);
+    assert.equal(
+      calls[0]!.url,
+      "https://api.test/jobs/v1/runs/job_123/logs?tail=10&since=1710000000000",
+    );
+  });
+
+  it("cancel DELETEs the job run route", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({
+        job_id: "job_123",
+        job_type: "kysigned.fflonk_prove.v0_17_0",
+        status: "cancelled",
+        created_at: "2026-05-18T00:00:00.000Z",
+      }),
+    );
+
+    const result = await sdk(fetch).jobs.cancel("prj_k", "job_123");
+
+    assert.equal(result.status, "cancelled");
+    assert.equal(calls[0]!.url, "https://api.test/jobs/v1/runs/job_123");
+    assert.equal(calls[0]!.method, "DELETE");
+  });
+
+  it("throws ProjectNotFound without fetch for unknown project", async () => {
+    const { fetch, calls } = mockFetch(() => json({}));
+
+    await assert.rejects(sdk(fetch).jobs.get("prj_missing", "job_123"), ProjectNotFound);
+
+    assert.equal(calls.length, 0);
+  });
+});

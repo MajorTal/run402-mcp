@@ -143,6 +143,17 @@ run402 deploy apply --manifest run402.deploy.json   # manifest uses secrets.requ
 
 Secret values are write-only. `list` returns keys and timestamps only; deploy manifests should declare dependencies with `secrets.require` and never contain values.
 
+### Jobs
+
+```bash
+run402 jobs submit --file job.json --project prj_...
+run402 jobs get job_abc123 --project prj_...
+run402 jobs logs job_abc123 --project prj_... --tail 100
+run402 jobs cancel job_abc123 --project prj_...
+```
+
+Jobs are fixed platform-managed runners, not arbitrary Docker execution. Submit the gateway-shaped JSON request (`job_type`, `input["input.json"]`, `max_cost_usd_micros`) and the CLI handles the required idempotency header through the SDK.
+
 ### Email
 
 ```bash

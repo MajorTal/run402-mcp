@@ -68,7 +68,7 @@ When adding a new tool/command, add it to the `SURFACE` array **and** `SDK_BY_CA
 ## Architecture
 
 ```
-@run402/sdk  (typed TypeScript kernel — 20 namespaces, ~100 methods)
+@run402/sdk  (typed TypeScript kernel — 21 namespaces, ~100 methods)
    │
    │   /index.ts    (isomorphic: Node + sandbox)
    │   /node        (Node-only: keystore + allowance + x402-wrapped fetch + fileSetFromDir)
@@ -93,9 +93,9 @@ The SDK is the canonical kernel — a single typed client with a `CredentialsPro
 - **`kernel.ts`** — Request function, `Client` interface. Only place that calls `globalThis.fetch`.
 - **`errors.ts`** — `Run402Error` hierarchy: `PaymentRequired`, `ProjectNotFound`, `Unauthorized`, `ApiError`, `NetworkError`, `Run402DeployError` (the v1.34+ structured envelope from the deploy state machine). Never calls `process.exit`.
 - **`credentials.ts`** — `CredentialsProvider` interface. Required: `getAuth`, `getProject`. Optional: `saveProject`, `updateProject`, `removeProject`, `setActiveProject`, `getActiveProject`, `readAllowance`, `saveAllowance`, `createAllowance`, `getAllowancePath`.
-- **`namespaces/*.ts`** — One class per resource group (projects, assets, functions, email, CI/OIDC, …). Namespaces hold a `Client` and expose typed methods. The canonical apply primitive lives at **`namespaces/deploy.ts`** (the file kept its historical name; the public-facing symbol is `r.project(id).apply`, with `r.deploy` retired in v2.0 in favor of an internal `_applyEngine`). Shared types in `deploy.types.ts` — see "Unified Apply" below.
+- **`namespaces/*.ts`** — One class per resource group (projects, assets, functions, jobs, email, CI/OIDC, …). Namespaces hold a `Client` and expose typed methods. The canonical apply primitive lives at **`namespaces/deploy.ts`** (the file kept its historical name; the public-facing symbol is `r.project(id).apply`, with `r.deploy` retired in v2.0 in favor of an internal `_applyEngine`). Shared types in `deploy.types.ts` — see "Unified Apply" below.
 - **`node/*.ts`** — Node-only entry point (`@run402/sdk/node`). Wraps `core/` keystore + allowance into `NodeCredentialsProvider`. Sets up x402-wrapped fetch via `createLazyPaidFetch()`. Adds `fileSetFromDir(path)` for filesystem byte sources and the deploy manifest adapter (`loadDeployManifest(path)`, `normalizeDeployManifest(input)`) for CLI/MCP-compatible JSON.
-- **`scoped.ts`** — `ScopedRun402` sub-client. Returned by `r.project(id?)` and `r.useProject(id)`. Wraps every project-id-bearing namespace method with the id pre-bound, so `p.apply({ site })` (no `project`), `p.functions.list()`, `p.assets.put(key, src)` all "just work" once the scope is set. Caller-supplied `project_id` / `project` still wins (override-friendly). The unwrapped namespaces (`r.assets`, `r.functions`, …) keep their required-id signatures unchanged — scoped is sugar, not a replacement. The apply primitive is only exposed via the scoped client (`r.project(id).apply(spec)`); there is no public `r.deploy` since v2.0.
+- **`scoped.ts`** — `ScopedRun402` sub-client. Returned by `r.project(id?)` and `r.useProject(id)`. Wraps every project-id-bearing namespace method with the id pre-bound, so `p.apply({ site })` (no `project`), `p.functions.list()`, `p.jobs.get(jobId)`, `p.assets.put(key, src)` all "just work" once the scope is set. Caller-supplied `project_id` / `project` still wins (override-friendly). The unwrapped namespaces (`r.assets`, `r.functions`, `r.jobs`, …) keep their required-id signatures unchanged — scoped is sugar, not a replacement. The apply primitive is only exposed via the scoped client (`r.project(id).apply(spec)`); there is no public `r.deploy` since v2.0.
 
 ### Project-scoped sub-client (`r.project(id?)`)
 

@@ -122,6 +122,12 @@ import type {
   FunctionUpdateOptions,
   FunctionUpdateResult,
 } from "./namespaces/functions.types.js";
+import type {
+  ManagedJobLogsOptions,
+  ManagedJobLogsResponse,
+  ManagedJobResponse,
+  ManagedJobSubmitRequest,
+} from "./namespaces/jobs.js";
 import type { DeleteSecretResult, SecretListResult } from "./namespaces/secrets.js";
 import type {
   DisableInboundResult,
@@ -634,6 +640,23 @@ class ScopedSecrets {
   }
 }
 
+class ScopedJobs {
+  constructor(private readonly parent: Run402, private readonly projectId: string) {}
+
+  submit(request: ManagedJobSubmitRequest): Promise<ManagedJobResponse> {
+    return this.parent.jobs.submit(this.projectId, request);
+  }
+  get(jobId: string): Promise<ManagedJobResponse> {
+    return this.parent.jobs.get(this.projectId, jobId);
+  }
+  logs(jobId: string, opts?: ManagedJobLogsOptions): Promise<ManagedJobLogsResponse> {
+    return this.parent.jobs.logs(this.projectId, jobId, opts);
+  }
+  cancel(jobId: string): Promise<ManagedJobResponse> {
+    return this.parent.jobs.cancel(this.projectId, jobId);
+  }
+}
+
 class ScopedSenderDomain {
   constructor(private readonly parent: Run402, private readonly projectId: string) {}
 
@@ -702,6 +725,7 @@ export class ScopedRun402 {
   readonly domains: ScopedDomains;
   readonly email: ScopedEmail;
   readonly functions: ScopedFunctions;
+  readonly jobs: ScopedJobs;
   readonly secrets: ScopedSecrets;
   readonly senderDomain: ScopedSenderDomain;
   readonly subdomains: ScopedSubdomains;
@@ -719,6 +743,7 @@ export class ScopedRun402 {
     this.domains = new ScopedDomains(parent, projectId);
     this.email = new ScopedEmail(parent, projectId);
     this.functions = new ScopedFunctions(parent, projectId);
+    this.jobs = new ScopedJobs(parent, projectId);
     this.secrets = new ScopedSecrets(parent, projectId);
     this.senderDomain = new ScopedSenderDomain(parent, projectId);
     this.subdomains = new ScopedSubdomains(parent, projectId);

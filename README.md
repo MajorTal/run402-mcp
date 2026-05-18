@@ -294,7 +294,7 @@ const p = await r.project(project.project_id);
 await p.assets.put("hello.txt", { content: "hi" });
 ```
 
-The SDK is organised as 20 namespaces: `projects`, `assets`, `ci`, `sites`, `functions`, `secrets`, `subdomains`, `domains`, `email` (+ `webhooks`), `senderDomain`, `auth`, `apps`, `tier`, `billing`, `contracts`, `ai`, `allowance`, `service`, `admin`, plus the `r.project(id).apply` hero for atomic mixed writes (release slices + assets slice via `/apply/v1/*`). Every operation throws a typed `Run402Error` subclass on failure: `PaymentRequired`, `ProjectNotFound`, `Unauthorized`, `ApiError`, `NetworkError`, `LocalError`, `Run402DeployError`. `apply()` automatically re-plans safe current-base `BASE_RELEASE_CONFLICT` races and emits `apply.retry` progress events. See [`sdk/README.md`](./sdk/README.md).
+The SDK is organised as 21 namespaces: `projects`, `assets`, `ci`, `sites`, `functions`, `jobs`, `secrets`, `subdomains`, `domains`, `email` (+ `webhooks`), `senderDomain`, `auth`, `apps`, `tier`, `billing`, `contracts`, `ai`, `allowance`, `service`, `admin`, plus the `r.project(id).apply` hero for atomic mixed writes (release slices + assets slice via `/apply/v1/*`). Every operation throws a typed `Run402Error` subclass on failure: `PaymentRequired`, `ProjectNotFound`, `Unauthorized`, `ApiError`, `NetworkError`, `LocalError`, `Run402DeployError`. `apply()` automatically re-plans safe current-base `BASE_RELEASE_CONFLICT` races and emits `apply.retry` progress events. See [`sdk/README.md`](./sdk/README.md).
 
 ## CLI — `run402`
 
@@ -441,6 +441,7 @@ The full MCP surface — every tool is a thin shim over an SDK call.
 | `update_function` | Update schedule / timeout / memory without redeploying code. |
 | `list_functions` / `delete_function` | List / remove functions. |
 | `set_secret` / `list_secrets` / `delete_secret` | Manage `process.env` secrets injected into all functions. Values are write-only; list returns keys and timestamps only. |
+| `jobs_submit` / `jobs_get` / `jobs_logs` / `jobs_cancel` | Submit and inspect fixed platform-managed jobs. Requests use the gateway jobs shape; the SDK supplies the required idempotency header. |
 
 ### Auth & email
 

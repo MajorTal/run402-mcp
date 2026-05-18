@@ -809,6 +809,25 @@ Injected as `process.env` in functions. Values are write-only — `list` returns
 - `run402 secrets set <id> <KEY> [<VALUE>] [--file <path>|--stdin]`
 - `run402 secrets <list|delete> <id> [<KEY>]`
 
+### jobs
+Fixed platform-managed jobs. This is not arbitrary Docker execution: submit a gateway-shaped request for the delivered `job_type`, then inspect status, logs, or cancel the run. The SDK supplies the required idempotency header; the CLI does not expose it.
+
+- `run402 jobs submit --file job.json [--project <id>]`
+- `run402 jobs submit --stdin [--project <id>]`
+- `run402 jobs get <job_id> [--project <id>]`
+- `run402 jobs logs <job_id> [--project <id>] [--tail <n>] [--since <epoch_ms>]`
+- `run402 jobs cancel <job_id> [--project <id>]`
+
+Submit request shape:
+
+```json
+{
+  "job_type": "kysigned.fflonk_prove.v0_17_0",
+  "input": { "input.json": {} },
+  "max_cost_usd_micros": 50000
+}
+```
+
 ### assets (primary storage API)
 
 Direct-to-S3 asset storage. Works for any size from 1 byte up to 5 TiB. No bucket concept — assets live in a flat key namespace per project. Renamed from `blob` in v2.0 alongside the unified-apply rename.

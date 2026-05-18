@@ -582,7 +582,7 @@ The helper makes raw `fetch()` calls to the project's own gateway endpoints usin
 
 ## Namespaces — full surface
 
-The `Run402` class exposes 20 namespaces. Click into the SDK source for full method signatures.
+The `Run402` class exposes 21 namespaces. Click into the SDK source for full method signatures.
 
 > **Reference tables below use plain fences, not `ts` fences.** They document the
 > type surface in compact form — they are not runnable programs. Runnable example
@@ -908,6 +908,25 @@ delete(projectId, name): Promise<void>
 `FunctionLogEntry` includes `timestamp` and `message`, plus optional `event_id`, `log_stream_name`, `ingestion_time`, and `request_id` metadata when the gateway can provide it. Use `requestId` to follow a routed browser failure exposed as `X-Run402-Request-Id` / JSON `request_id`; SDK calls reject invalid `since` timestamps, invalid request ids, and `tail` values outside 1..1000 locally instead of forwarding them.
 
 `deps` accepts npm specs: bare names → latest at deploy time, pinned (`lodash@4.17.21`) and ranges (`date-fns@^3.0.0`) honored verbatim. Max 30 entries / 200 chars each; empty or whitespace-only entries are rejected. **Native binary modules are rejected.** Don't list `@run402/functions` (auto-bundled).
+
+### `r.jobs`
+
+Fixed platform-managed jobs over `/jobs/v1/*`. This is not arbitrary Docker execution: callers choose the delivered `job_type`, provide the gateway-shaped JSON input, and set a hard cost cap. The SDK loads the project's `service_key` and supplies the required `Idempotency-Key` header internally.
+
+```
+submit(projectId, {
+  job_type: "kysigned.fflonk_prove.v0_17_0",
+  input: { "input.json": Record<string, unknown> },
+  max_cost_usd_micros: number,
+}): Promise<ManagedJobResponse>
+get(projectId, jobId): Promise<ManagedJobResponse>
+logs(projectId, jobId, opts?: { tail?, since? }): Promise<{ logs: ManagedJobLogEntry[] }>
+cancel(projectId, jobId): Promise<ManagedJobResponse>
+```
+
+The scoped client pre-binds the project id: `const p = await r.project(id); await p.jobs.get(jobId)`.
+
+`ManagedJobResponse` mirrors the gateway snake_case shape: `job_id`, `job_type`, `status` (`queued` / `running` / `completed` / `failed` / `cancelled`), `created_at`, optional `started_at`, `completed_at`, `artifacts`, `metadata`, and `error`.
 
 ### `r.secrets`
 
