@@ -13,20 +13,19 @@ This monorepo ships **five interfaces**:
 - **SDK** (`sdk/`) — typed TypeScript client for the run402 API. Used by external integrators, MCP/CLI/OpenClaw, and (eventually) inside deployed functions. Published as `@run402/sdk` on npm. Two entry points: root (isomorphic — works in Node 22, Deno, Bun, V8 isolates) and `/node` (zero-config Node defaults — keystore + allowance + x402).
 - **MCP server** (root `src/`) — published as `run402-mcp` on npm. Each tool is a thin shim over an SDK call. Read by Claude Desktop / Cursor / Cline / Claude Code.
 - **CLI** (`cli/`) — standalone CLI published as `run402` on npm. Each subcommand is a thin shim over an SDK call; argv parsing and JSON output stay at the CLI edge.
-- **Functions library** (`functions/`) — in-function helper imported _inside_ deployed serverless functions. Exposes `db(req)`, `adminDb()`, `getUser()`, `email`, `ai`, and `assets`. Published as `@run402/functions` on npm. Distinct from the SDK: this is the request-scoped, in-function shape; the SDK is the typed external client. The two are complementary, not redundant.
+- **Functions library** — in-function helper imported _inside_ deployed serverless functions. Exposes `db(req)`, `adminDb()`, `getUser()`, `email`, `ai`, and `assets`. Published as `@run402/functions` on npm. **Source lives in the private gateway monorepo** (`kychee-com/run402-private` at `packages/functions/`) so it can co-evolve with the gateway code that bundles it. Distinct from the SDK: this is the request-scoped, in-function shape; the SDK is the typed external client. The two are complementary, not redundant.
 - **OpenClaw skill** (`openclaw/`) — script-based skill for OpenClaw agents, re-exports from CLI modules.
 
-Workspace layout: `package.json` declares `cli`, `sdk`, and `functions` as npm workspaces, and `pnpm-workspace.yaml` mirrors that set for pnpm-based hosts. `core/` is shared internal code, not an npm package.
+Workspace layout: `package.json` declares `cli` and `sdk` as npm workspaces, and `pnpm-workspace.yaml` mirrors that set for pnpm-based hosts. `core/` is shared internal code, not an npm package. `@run402/functions` is NOT a workspace of this repo — its source lives in the private gateway monorepo so the gateway and the in-function helpers it bundles can change atomically in one commit.
 
-The first four packages release in lockstep via the `/publish` skill at the same version (the skill also supports per-package selection for off-cycle patches). MCP, CLI, OpenClaw, and the Node SDK all share the request kernel via `@run402/sdk`. `@run402/functions` is the exception — it makes raw `fetch()` calls against the project's own endpoints using ambient request context. `core/` holds filesystem primitives (keystore, allowance, SIWE signing) that the Node SDK provider wraps.
+The three packages in this repo (`run402-mcp`, `run402`, `@run402/sdk`) release in lockstep via the `/publish` skill at the same version (the skill also supports per-package selection for off-cycle patches). MCP, CLI, OpenClaw, and the Node SDK all share the request kernel via `@run402/sdk`. `@run402/functions` is published separately from the private repo via its own `/publish-functions` skill, but ships at the same npm name. `core/` holds filesystem primitives (keystore, allowance, SIWE signing) that the Node SDK provider wraps.
 
 ## Build & Test Commands
 
 ```bash
 npm run build:core         # tsc -p core/tsconfig.json → core/dist/
 npm run build:sdk          # tsc -p sdk/tsconfig.json  → sdk/dist/
-npm run build:functions    # tsc -p functions/tsconfig.json → functions/dist/
-npm run build              # build:core + build:sdk + build:functions + tsc → dist/ (also stages dist copies under cli/)
+npm run build              # build:core + build:sdk + tsc → dist/ (also stages dist copies under cli/)
 npm run start              # node dist/index.js (stdio MCP transport)
 
 npm run test:skill         # validates SKILL.md and openclaw/SKILL.md (49 tests across both)
@@ -80,14 +79,16 @@ When adding a new tool/command, add it to the `SURFACE` array **and** `SDK_BY_CA
 core/      ← Node-only primitives (keystore, allowance, SIWE signing, config paths)
               Imported by sdk/src/node via ../../../core/dist/; not an npm package.
 
-functions/ ← @run402/functions in-function helper (db, adminDb, getUser, email, ai, assets).
-              Treated as platform code, not a library: the gateway bundles its own
-              installed copy via esbuild alias at deploy time (not a per-deploy npm
-              install). A gateway redeploy propagates runtime fixes to all future
-              function deployments without users needing to redeploy their functions.
-              The npm package (@run402/functions) is published for TypeScript types
-              and local editor autocomplete only — not the runtime bundling source.
-              also installable for local TypeScript autocomplete.
+@run402/functions ← in-function helper (db, adminDb, getUser, email, ai, assets, routedHttp).
+              SOURCE LIVES IN kychee-com/run402-private at packages/functions/ — NOT in
+              this repo. Treated as platform code, not a library: the gateway bundles
+              its own workspace copy via esbuild alias at deploy time (no npm install
+              for @run402/functions per deploy). A gateway redeploy propagates runtime
+              fixes to all future function deployments without users needing to redeploy.
+              The npm package (@run402/functions) is published from the private repo
+              for TypeScript types and local editor autocomplete — not the runtime
+              bundling source. To change the surface, edit packages/functions/src/ in
+              the private repo and run /publish-functions there.
 ```
 
 The SDK is the canonical kernel — a single typed client with a `CredentialsProvider` interface for credential access and a pluggable `fetch` (for x402 wrapping in Node, session tokens in sandboxes). MCP handlers and CLI commands are thin shims: argv/schema parsing + SDK call + output formatting. They must not call Run402 gateway endpoints directly; add missing SDK methods first. The only direct `fetch()` calls allowed at those edges are non-Run402 external services (Tempo RPC, GitHub API) and presigned storage part URLs returned by the SDK. `sync.test.ts` enforces this boundary. When code-mode MCP ships, the same SDK runs inside a V8 isolate.
@@ -149,16 +150,22 @@ The `core/` module contains shared logic imported by all interfaces:
 
 Core functions return `null` or throw — they never call `process.exit()`. Each interface wraps with its own error behavior.
 
-### Functions library (`functions/`)
+### Functions library (`@run402/functions`)
 
-- **`functions/src/index.ts`** — Public exports: `db`, `adminDb`, `getUser`, `email`, `ai`, `assets`, `routedHttp`, and routed HTTP envelope types/helpers (`text`, `json`, `bytes`, `isRequest`). Each helper makes raw `fetch()` calls against the project's own gateway endpoints using ambient request context (the function's `RUN402_PROJECT_ID` / `RUN402_SERVICE_KEY` env vars baked at deploy time), except routed HTTP helpers which encode/decode the public browser ingress envelope.
+**Source location: `kychee-com/run402-private` at `packages/functions/`.** Not in this repo. The package source moved to the gateway monorepo so the gateway-side endpoints and the in-function helpers that call them can co-evolve in a single PR and the same CI run — eliminating drift by construction. The npm package (`@run402/functions`) on the registry continues to ship at the same name and is what users install for TypeScript autocomplete.
+
+Quick reference of the public surface (full API lives in the private repo's `packages/functions/README.md`):
+
 - **`db(req)`** — caller-context PostgREST client. Forwards the incoming `Authorization` header; RLS evaluates against the caller's role.
 - **`adminDb()`** — service-key client. Routes to `/admin/v1/rest/*` (the gateway rejects `role=service_role` on `/rest/v1/*`, so bypass traffic lives on its own surface). Use only when the function acts on behalf of the platform.
 - **`adminDb().sql(query, params?)`** — raw parameterized SQL, always BYPASSRLS.
-- **`ai.generateImage({ prompt, aspect? })`** — project-billed runtime image generation from deployed functions. Uses the project service key and `/ai/v1/generate-image`, not the wallet/x402 `/generate-image/v1` endpoint. Supported aspects are `square`, `landscape`, and `portrait`; result shape is `{ image, content_type, aspect }`. Gateway rate limits and spend caps apply to the project billing account; routed public functions still own app auth and abuse limits.
+- **`getUser(req)`** — verify the caller's JWT, returns `{ id, role, email }` or `null`.
+- **`email.send(opts)`** — send email from the project's mailbox (raw HTML or template).
+- **`ai.translate(text, to, opts?)`**, **`ai.moderate(text)`**, **`ai.generateImage({ prompt, aspect? })`** — project-billed AI helpers using the function's service-key auth.
 - **`assets.put(key, source, opts?)`** — in-function asset upload through the service-key `/apply/v1/service-asset-put` path. Uses the same CAS/activation substrate as deploy-time assets and returns SDK-compatible `AssetRef` snake_case + camelCase fields.
 - **`routedHttp`** — non-framework helpers for the `run402.routed_http.v1` same-origin browser ingress contract. Direct `/functions/v1/:name` remains API-key protected; routed function code owns app auth, CSRF, CORS/`OPTIONS`, cookies, redirects, cache headers, and spoofed forwarding-header hygiene.
-- The gateway bundles its own installed copy of this library into every function zip via esbuild `alias` at deploy time — it is **platform code, not a user dependency**. User-declared `--deps` are npm-installed and esbuild-bundled separately. Native binaries are rejected. Publish to npm (`@run402/functions`) for API/type changes that affect user editors; runtime fixes (wrong URLs, logic bugs) only need a gateway redeploy. Also installable locally for full TypeScript autocomplete.
+
+**Bundling model:** the gateway bundles its workspace copy of this library into every function zip via esbuild `alias` at deploy time — it is **platform code, not a user dependency**. User-declared `--deps` are npm-installed and esbuild-bundled separately. Native binaries are rejected. Publish a new `@run402/functions` to npm (via the private repo's `/publish-functions` skill) for API/type changes that affect user editors; runtime fixes (wrong URLs, logic bugs) only need a gateway redeploy. Also installable locally for full TypeScript autocomplete.
 
 ### MCP Server (`src/`)
 

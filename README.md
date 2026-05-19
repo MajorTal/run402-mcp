@@ -22,9 +22,9 @@ This monorepo ships every surface an agent can pick up:
 | [`run402` CLI](./cli/) | Terminal, scripts, CI, agent-controlled shells — JSON in, JSON out, exit code on failure |
 | [`run402-mcp`](./src/) | Claude Desktop, Cursor, Cline, Claude Code — core Run402 operations as MCP tools |
 | [OpenClaw skill](./openclaw/) | OpenClaw agents (no MCP server required) |
-| [`@run402/functions`](./functions/) | Imported _inside_ deployed functions (`db(req)`, `adminDb()`, `getUser()`, `email`, `ai`, `assets`) and for TypeScript autocomplete in your editor |
+| [`@run402/functions`](https://www.npmjs.com/package/@run402/functions) | Imported _inside_ deployed functions (`db(req)`, `adminDb()`, `getUser()`, `email`, `ai`, `assets`) and for TypeScript autocomplete in your editor. Source lives in the private gateway monorepo (it's bundled into your function zip at deploy time, so it co-evolves with the gateway). |
 
-All five interfaces release in lockstep at the same version and share a single typed kernel where appropriate: `@run402/sdk`. MCP tools, CLI subcommands, and OpenClaw scripts are thin shims over SDK calls; `@run402/functions` is the in-function helper that runs inside deployed code. Pick whichever interface fits your runtime.
+All five interfaces share a single typed kernel where appropriate: `@run402/sdk`. MCP tools, CLI subcommands, and OpenClaw scripts are thin shims over SDK calls. `@run402/functions` is the in-function helper that runs inside deployed code; the npm package on the registry stays in lockstep with what the gateway bundles, even though its source ships from the private monorepo. Pick whichever interface fits your runtime.
 
 ## 30-second start
 
@@ -551,7 +551,7 @@ Local state lives at:
 ## Development
 
 ```bash
-npm run build           # builds core/, sdk/, functions/, then the MCP server
+npm run build           # builds core/, sdk/, then the MCP server
 npm test                # SKILL + sync + unit tests
 npm run test:e2e        # 47 CLI end-to-end tests
 npm run test:sync       # checks MCP/CLI/OpenClaw/SDK stay in sync

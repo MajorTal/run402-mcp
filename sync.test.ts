@@ -894,7 +894,6 @@ describe("deploy route surface alignment", () => {
       "llms-mcp.txt",
       "sdk/README.md",
       "sdk/llms-sdk.txt",
-      "functions/README.md",
     ];
     const requiredPatterns = [
       [/routes\.replace|routes"\s*:\s*\{\s*"replace"/, "routes.replace"],
@@ -1452,13 +1451,6 @@ describe("agent deploy-friction docs stay visible", () => {
         [/allowWarningCodes/, "SDK README warning-code acknowledgement"],
         [/BAD_FIELD/, "SDK README tier preflight error"],
         [/activation_pending/, "SDK README activation failure classifier"],
-      ],
-    },
-    {
-      file: "functions/README.md",
-      patterns: [
-        [/ai\.generateImage/, "functions runtime image helper"],
-        [/project runtime image endpoint/, "project-billed runtime image endpoint"],
       ],
     },
   ];
