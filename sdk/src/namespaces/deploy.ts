@@ -603,6 +603,58 @@ async function applyOnce(
   // Release-only applies leave `result.assets` undefined.
   if (plan.asset_entries && plan.asset_entries.length > 0) {
     result.assets = buildAssetManifestFromPlanEntries(plan.asset_entries);
+
+    // v1.49 image-variant follow-up: variants are generated AT COMMIT TIME
+    // (parent gateway change Section 5 — `prepareStagedAssetVariants` runs
+    // before the activation txn opens). The plan that funded `result.assets`
+    // was built BEFORE commit, so its `asset_entries[].asset_ref` doesn't
+    // include the variant fields (the gateway only threads `image_data`
+    // through `buildAssetRefForPlan` for SHAs that ALREADY have variants
+    // in `internal.blob_image_variants`).
+    //
+    // For image puts, do a dry-run re-plan with the same spec. Bytes are
+    // now in CAS (the commit just landed) AND variant rows exist in the
+    // DB. The new plan response surfaces the variants. Dry-run keeps it
+    // cheap: no new plan_id or operation_id rows are created.
+    //
+    // Best-effort: a re-plan failure shouldn't fail the apply. The bytes
+    // are committed, the release is live, and the variant fields are
+    // strictly additive — leaving them empty when the recheck errors is
+    // worse than failing the apply.
+    const hasImagePut = spec.assets?.put?.some((entry) => {
+      const ct = ("content_type" in entry && typeof entry.content_type === "string")
+        ? entry.content_type
+        : "";
+      return ct.startsWith("image/");
+    });
+    if (hasImagePut) {
+      try {
+        const { plan: recheck } = await planInternal(client, spec, undefined, true);
+        if (recheck.asset_entries && recheck.asset_entries.length > 0) {
+          for (const recheckEntry of recheck.asset_entries) {
+            const existing = result.assets.byKey[recheckEntry.key];
+            if (!existing) continue;
+            const ref = recheckEntry.asset_ref;
+            if (ref.width_px !== undefined) existing.width_px = ref.width_px;
+            if (ref.height_px !== undefined) existing.height_px = ref.height_px;
+            if (ref.blurhash !== undefined) existing.blurhash = ref.blurhash;
+            if (ref.variant_spec_version !== undefined) {
+              existing.variant_spec_version = ref.variant_spec_version;
+            }
+            if (ref.display_url !== undefined) existing.display_url = ref.display_url;
+            if (ref.display_immutable_url !== undefined) {
+              existing.display_immutable_url = ref.display_immutable_url;
+            }
+            if (ref.variants !== undefined) existing.variants = ref.variants;
+          }
+        }
+      } catch {
+        // Best-effort: leave variant fields unpopulated rather than
+        // failing a successful apply. Consumers can re-call
+        // `r.assets.put` with the same bytes (dedup) to trigger the
+        // plan-time surfacing if variants are missing.
+      }
+    }
   }
 
   return result;

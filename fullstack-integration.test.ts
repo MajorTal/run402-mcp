@@ -767,8 +767,11 @@ describe("Run402 full-stack integration (live API, no mocks)", { timeout: 900_00
     assert.equal(putRef.variants.medium?.format, "webp");
     assert.equal(putRef.variants.large?.format, "webp");
     assert.equal(putRef.variants.display_jpeg, undefined, "non-HEIC sources must NOT include display_jpeg");
-    // Non-HEIC: display_url should equal cdn_url (browser-renderable directly).
-    assert.equal(putRef.display_url, putRef.cdnUrl ?? putRef.cdn_immutable_url ?? undefined, "non-HEIC display_url should equal cdn_url");
+    // Non-HEIC: display_url equals the wire's mutable cdn_url (which the
+    // SDK exposes as `cdnMutableUrl` — `cdnUrl` aliases the immutable
+    // form). display_immutable_url equals the SDK's `cdnUrl`.
+    assert.equal(putRef.display_url, putRef.cdnMutableUrl, "non-HEIC display_url should equal the wire cdn_url (mutable form)");
+    assert.equal(putRef.display_immutable_url, putRef.cdnUrl, "non-HEIC display_immutable_url should equal the wire cdn_immutable_url");
     // SDK convenience getters are present for image refs.
     assert.equal(putRef.thumbUrl, putRef.variants.thumb?.cdn_url);
     assert.equal(putRef.displayUrl, putRef.display_url);
