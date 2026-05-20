@@ -100,6 +100,29 @@ jobs:
       - name: Build
         run: npm run build --workspace=astro
 
+      # One-shot diagnostic: dump the OIDC token's claims (just the JWT
+      # payload, NOT the signed token itself, so it's safe to log) so we
+      # can compare claims-as-seen-by-npm against the Trusted Publisher
+      # config on npmjs.com. Remove this step once OIDC publish is
+      # confirmed working.
+      - name: Debug OIDC claims
+        run: |
+          set -euo pipefail
+          # Request a token scoped to npm registry's expected audience.
+          # The token request URL + bearer come from GH-injected env vars
+          # only available because permissions.id-token: write is set.
+          RESP=$(curl -sSL -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org")
+          TOKEN=$(echo "$RESP" | node -e 'let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.parse(s).value)})')
+          # Decode the JWT payload (middle segment). DO NOT echo $TOKEN.
+          PAYLOAD=$(echo "$TOKEN" | cut -d. -f2)
+          # Pad base64url to a multiple of 4 so `base64 -d` accepts it.
+          PAD=$((4 - ${#PAYLOAD} % 4))
+          if [ $PAD -ne 4 ]; then PAYLOAD="${PAYLOAD}$(printf '%*s' $PAD | tr ' ' '=')"; fi
+          # base64url → base64 (replace - / _)
+          PAYLOAD=$(echo "$PAYLOAD" | tr '_-' '/+')
+          echo "$PAYLOAD" | base64 -d | node -e 'let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{const c=JSON.parse(s); const keep=["aud","iss","sub","repository","repository_owner","repository_id","workflow","workflow_ref","job_workflow_ref","ref","event_name","environment","actor"]; for (const k of keep) if (k in c) console.log(k+": "+JSON.stringify(c[k]));})'
+
       - name: Bump version
         id: bump
         run: |
