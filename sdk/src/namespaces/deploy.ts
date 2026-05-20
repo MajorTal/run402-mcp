@@ -1956,6 +1956,7 @@ const RELEASE_SPEC_FIELDS = new Set([
   "routes",
   "checks",
   "assets", // v1.48 unified-apply
+  "i18n", // v2.5 routed-locale-context
 ]);
 const DEPLOYABLE_SPEC_FIELDS = [
   "assets", // v1.48 unified-apply
@@ -1966,6 +1967,7 @@ const DEPLOYABLE_SPEC_FIELDS = [
   "subdomains",
   "routes",
   "checks",
+  "i18n", // v2.5 routed-locale-context
 ] as const;
 const BASE_SPEC_FIELDS = new Set(["release", "release_id"]);
 const DATABASE_SPEC_FIELDS = new Set(["migrations", "expose", "zero_downtime"]);
@@ -1991,6 +1993,11 @@ const ROUTE_ENTRY_FIELDS = new Set(["pattern", "methods", "target", "acknowledge
 const FUNCTION_ROUTE_TARGET_FIELDS = new Set(["type", "name"]);
 const STATIC_ROUTE_TARGET_FIELDS = new Set(["type", "file"]);
 const ROUTE_METHOD_SET = new Set<string>(ROUTE_HTTP_METHODS);
+const I18N_SPEC_FIELDS = new Set(["defaultLocale", "locales", "detect"]);
+const I18N_LOCALE_TAG_REGEX = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const I18N_COOKIE_NAME_REGEX = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+const I18N_MAX_LOCALES = 50;
+const I18N_MAX_DETECT_SOURCES = 10;
 
 function validateSpec(spec: ReleaseSpec): void {
   if (!spec || typeof spec !== "object") {
@@ -2030,6 +2037,7 @@ function validateSpec(spec: ReleaseSpec): void {
   validateRoutesSpec(raw.routes);
   validateChecksSpec(raw.checks);
   validateSecretsSpec(raw.secrets);
+  validateI18nSpec(raw.i18n);
 
   const subdomains = raw.subdomains as Record<string, unknown> | undefined;
   const set = subdomains?.set as string[] | undefined;
@@ -2393,6 +2401,122 @@ function validateChecksSpec(checks: unknown): void {
   }
 }
 
+function validateI18nSpec(i18n: unknown): void {
+  if (i18n === undefined) return;
+  if (i18n === null) return;
+  const obj = requireObject(i18n, "i18n");
+  validateKnownFields(obj, "i18n", I18N_SPEC_FIELDS, {
+    default_locale: "Use `defaultLocale` (camelCase) in i18n.",
+    default: "Use `defaultLocale` in i18n.",
+    locale: "Use `locales` (plural array) in i18n.",
+  });
+
+  if (typeof obj.defaultLocale !== "string" || obj.defaultLocale.length === 0) {
+    throw invalidSpec(
+      "ReleaseSpec.i18n.defaultLocale is required and must be a non-empty string",
+      "i18n.defaultLocale",
+    );
+  }
+  if (!I18N_LOCALE_TAG_REGEX.test(obj.defaultLocale)) {
+    throw invalidSpec(
+      `ReleaseSpec.i18n.defaultLocale ${JSON.stringify(obj.defaultLocale)} must match /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/`,
+      "i18n.defaultLocale",
+    );
+  }
+
+  if (!Array.isArray(obj.locales)) {
+    throw invalidSpec(
+      "ReleaseSpec.i18n.locales is required and must be a non-empty array of locale tags",
+      "i18n.locales",
+    );
+  }
+  if (obj.locales.length === 0) {
+    throw invalidSpec(
+      "ReleaseSpec.i18n.locales must contain at least one entry",
+      "i18n.locales",
+    );
+  }
+  if (obj.locales.length > I18N_MAX_LOCALES) {
+    throw invalidSpec(
+      `ReleaseSpec.i18n.locales accepts at most ${I18N_MAX_LOCALES} entries (got ${obj.locales.length})`,
+      "i18n.locales",
+    );
+  }
+  const seenLocales = new Set<string>();
+  for (let i = 0; i < obj.locales.length; i++) {
+    const tag = obj.locales[i];
+    const path = `i18n.locales.${i}`;
+    if (typeof tag !== "string" || tag.length === 0) {
+      throw invalidSpec(`ReleaseSpec.${path} must be a non-empty string`, path);
+    }
+    if (!I18N_LOCALE_TAG_REGEX.test(tag)) {
+      throw invalidSpec(
+        `ReleaseSpec.${path} (${JSON.stringify(tag)}) must match /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/`,
+        path,
+      );
+    }
+    if (seenLocales.has(tag)) {
+      throw invalidSpec(
+        `ReleaseSpec.i18n.locales contains duplicate entry ${JSON.stringify(tag)}`,
+        path,
+      );
+    }
+    seenLocales.add(tag);
+  }
+  if (!seenLocales.has(obj.defaultLocale as string)) {
+    throw invalidSpec(
+      `ReleaseSpec.i18n.defaultLocale (${JSON.stringify(obj.defaultLocale)}) must be byte-identical to one entry in i18n.locales`,
+      "i18n.defaultLocale",
+    );
+  }
+
+  if (obj.detect !== undefined) {
+    if (!Array.isArray(obj.detect)) {
+      throw invalidSpec(
+        "ReleaseSpec.i18n.detect must be an array of detect sources",
+        "i18n.detect",
+      );
+    }
+    if (obj.detect.length > I18N_MAX_DETECT_SOURCES) {
+      throw invalidSpec(
+        `ReleaseSpec.i18n.detect accepts at most ${I18N_MAX_DETECT_SOURCES} entries (got ${obj.detect.length})`,
+        "i18n.detect",
+      );
+    }
+    for (let i = 0; i < obj.detect.length; i++) {
+      const source = obj.detect[i];
+      const path = `i18n.detect.${i}`;
+      if (typeof source !== "string" || source.length === 0) {
+        throw invalidSpec(
+          `ReleaseSpec.${path} must be a non-empty string ("accept-language" or "cookie:<name>")`,
+          path,
+        );
+      }
+      if (source === "accept-language") continue;
+      if (source.startsWith("cookie:")) {
+        const cookieName = source.slice("cookie:".length);
+        if (cookieName.length === 0) {
+          throw invalidSpec(
+            `ReleaseSpec.${path} cookie source is missing the cookie name (use "cookie:<name>")`,
+            path,
+          );
+        }
+        if (!I18N_COOKIE_NAME_REGEX.test(cookieName)) {
+          throw invalidSpec(
+            `ReleaseSpec.${path} cookie name ${JSON.stringify(cookieName)} must match the RFC 6265 cookie-name grammar /^[!#$%&'*+\\-.^_\`|~0-9A-Za-z]+$/`,
+            path,
+          );
+        }
+        continue;
+      }
+      throw invalidSpec(
+        `ReleaseSpec.${path} must be "accept-language" or "cookie:<name>" (got ${JSON.stringify(source)})`,
+        path,
+      );
+    }
+  }
+}
+
 function validateKnownFields(
   obj: Record<string, unknown>,
   resource: string,
@@ -2439,8 +2563,14 @@ function hasDeployableContent(spec: Record<string, unknown>): boolean {
     hasSubdomainsContent(spec.subdomains) ||
     hasRecordEntries(spec.routes) ||
     hasArrayEntries(spec.checks) ||
-    hasAssetsContent(spec.assets)
+    hasAssetsContent(spec.assets) ||
+    hasI18nContent(spec.i18n)
   );
+}
+
+function hasI18nContent(i18n: unknown): boolean {
+  if (i18n === null) return true;
+  return isRecord(i18n);
 }
 
 function hasAssetsContent(assets: unknown): boolean {
@@ -2839,6 +2969,9 @@ async function normalizeReleaseSpec(
   if (spec.subdomains) normalized.subdomains = spec.subdomains;
   if (hasOwn(spec as unknown as Record<string, unknown>, "routes")) {
     normalized.routes = spec.routes;
+  }
+  if (hasOwn(spec as unknown as Record<string, unknown>, "i18n")) {
+    normalized.i18n = spec.i18n;
   }
   if (spec.checks) normalized.checks = spec.checks;
   if (spec.secrets) normalized.secrets = spec.secrets;

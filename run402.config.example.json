@@ -73,5 +73,11 @@
     "replace": [
       { "pattern": "/api/*", "methods": ["GET", "POST"], "target": { "type": "function", "name": "api" } }
     ]
+  },
+
+  "i18n": {
+    "defaultLocale": "en",
+    "locales": ["en", "es", "fr"],
+    "detect": ["cookie:wl_locale", "accept-language"]
   }
 }

@@ -144,6 +144,46 @@ describe("Node deploy manifest helpers", () => {
     });
   });
 
+  it("preserves a full i18n slice through manifest normalization", async () => {
+    const normalized = await normalizeDeployManifest({
+      project_id: "prj_manifest",
+      site: { replace: { "index.html": "<h1>hi</h1>" } },
+      i18n: {
+        defaultLocale: "en",
+        locales: ["en", "es", "fr", "zh-Hant"],
+        detect: ["cookie:wl_locale", "accept-language"],
+      },
+    });
+
+    assert.deepEqual(normalized.spec.i18n, {
+      defaultLocale: "en",
+      locales: ["en", "es", "fr", "zh-Hant"],
+      detect: ["cookie:wl_locale", "accept-language"],
+    });
+  });
+
+  it("preserves i18n: null (clear-the-slice) through manifest normalization", async () => {
+    const normalized = await normalizeDeployManifest({
+      project_id: "prj_manifest",
+      i18n: null,
+    });
+    assert.equal(normalized.spec.i18n, null);
+  });
+
+  it("rejects snake_case typos in the i18n slice with a hint pointing at defaultLocale", async () => {
+    await assert.rejects(
+      () =>
+        normalizeDeployManifest({
+          project_id: "prj_manifest",
+          i18n: {
+            default_locale: "en",
+            locales: ["en"],
+          } as unknown as Parameters<typeof normalizeDeployManifest>[0]["i18n"],
+        }),
+      /default_locale.*defaultLocale/,
+    );
+  });
+
   it("normalizes explicit site public paths", async () => {
     const normalized = await normalizeDeployManifest({
       project_id: "prj_manifest",

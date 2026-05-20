@@ -313,6 +313,45 @@ export const deploySchema = {
     .describe(
       "Deploy-v2 web routes. Omit or pass null to carry forward base routes; pass { replace: [] } to clear routes; pass { replace: [{ pattern, methods?, target: { type: 'function', name } }] } for functions or exact GET/HEAD { target: { type: 'static', file } } entries for method-aware static route aliases. Prefer site.public_paths for ordinary clean static URLs.",
     ),
+  i18n: z
+    .union([
+      z.null(),
+      z
+        .object({
+          defaultLocale: z
+            .string()
+            .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/)
+            .describe(
+              "Default locale tag. MUST be byte-identical to one entry in locales[]. The platform does NOT silently canonicalize.",
+            ),
+          locales: z
+            .array(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/))
+            .min(1)
+            .max(50)
+            .describe(
+              "Supported locale tags. Non-empty, max 50 entries. Tags are opaque — only the safety regex is enforced. Negotiation returns canonical casing from this array, not the request's casing.",
+            ),
+          detect: z
+            .array(
+              z
+                .string()
+                .regex(/^(accept-language|cookie:[!#$%&'*+\-.^_`|~0-9A-Za-z]+)$/)
+                .describe(
+                  "Detect source: 'accept-language' or 'cookie:<name>' (RFC 6265 cookie-name grammar).",
+                ),
+            )
+            .max(10)
+            .optional()
+            .describe(
+              "Walked in order; first match wins. Defaults to ['accept-language'] when omitted, max 10 entries; [] is allowed and means 'always default'.",
+            ),
+        })
+        .strict(),
+    ])
+    .optional()
+    .describe(
+      "Routed-locale-context release slice. Omit to carry forward from base release; pass null to clear the slice; pass { defaultLocale, locales, detect? } to replace. Drives the negotiated locale that the gateway surfaces to routed HTTP function invocations via x-run402-locale and x-run402-default-locale request headers (omitted entirely when the active release has no i18n slice). Static-route hits do NOT receive locale negotiation.",
+    ),
   idempotency_key: z
     .string()
     .optional()
@@ -378,6 +417,16 @@ type DeployArgs = {
   };
   subdomains?: ReleaseSpec["subdomains"];
   routes?: ReleaseSpec["routes"];
+  // Schema produces detect as `string[]` (regex-validated); the SDK
+  // narrows to I18nDetectSource[] internally via the manifest adapter +
+  // validateSpec, so we keep the broader Zod-inferred shape here.
+  i18n?:
+    | null
+    | {
+        defaultLocale: string;
+        locales: string[];
+        detect?: string[];
+      };
   idempotency_key?: string;
   allow_warnings?: boolean;
   allow_warning_codes?: string[];
@@ -400,7 +449,13 @@ export async function handleDeploy(
   let idempotencyKey: string | undefined;
   try {
     const { allow_warnings: _allowWarnings, allow_warning_codes: _allowWarningCodes, ...manifestArgs } = args;
-    const normalized = await normalizeDeployManifest(manifestArgs);
+    // The Zod schema validates detect entries with a regex, but TS narrows
+    // them to `string[]`. The SDK's manifest adapter + validateSpec rerun
+    // the same checks before any wire call, so the cast here is purely a
+    // type bridge between Zod-inferred and SDK strict shapes.
+    const normalized = await normalizeDeployManifest(
+      manifestArgs as unknown as Parameters<typeof normalizeDeployManifest>[0],
+    );
     spec = normalized.spec;
     idempotencyKey = normalized.idempotencyKey;
   } catch (err) {

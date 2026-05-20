@@ -193,6 +193,80 @@ Use `run402 deploy diagnose --project prj_123 https://example.com/events --metho
 
 Known route warning recovery: `PUBLIC_ROUTED_FUNCTION` means review app auth, CSRF, CORS/`OPTIONS`, and cookies before retrying with `--allow-warning PUBLIC_ROUTED_FUNCTION`; broad `--allow-warnings` is last resort after every warning is reviewed. `ROUTE_SHADOWS_STATIC_PATH` and `WILDCARD_ROUTE_SHADOWS_STATIC_PATHS` mean inspect affected paths, active routes, `static_public_paths`, and resolve diagnostics before confirming. `STATIC_ALIAS_SHADOWS_STATIC_PATH`, `STATIC_ALIAS_RELATIVE_ASSET_RISK`, `STATIC_ALIAS_DUPLICATE_CANONICAL_URL`, `STATIC_ALIAS_EXTENSIONLESS_NON_HTML`, and `STATIC_ALIAS_TABLE_NEAR_LIMIT` are route-only static alias warnings; prefer `site.public_paths` for ordinary clean URLs, inspect the backing `asset_path`, fix relative assets/canonical URLs, and avoid table-exhausting page-by-page routes. `ROUTE_TARGET_CARRIED_FORWARD` means inspect carried-forward function targets. `METHOD_SPECIFIC_ROUTE_ALLOWS_GET_STATIC_FALLBACK` means confirm static fallback is intended. `WILDCARD_ROUTE_EXCLUDES_MUTATION_METHODS` means a wildcard API prefix only allows `GET`/`HEAD`; add mutation methods such as `POST`, omit methods for an API prefix, or set `acknowledge_readonly: true` on an intentionally read-only GET/HEAD final-wildcard function route. `ROUTE_TABLE_NEAR_LIMIT` means consolidate routes. `ROUTES_NOT_ENABLED` means deploy without `routes` or request enablement. Runtime route failure codes to branch on: `ROUTE_MANIFEST_LOAD_FAILED` (manifest/propagation), `ROUTED_INVOKE_WORKER_SECRET_MISSING` (custom-domain Worker secret), `ROUTED_INVOKE_AUTH_FAILED` (internal invoke signature), `ROUTED_ROUTE_STALE` (selected route failed release revalidation), `ROUTE_METHOD_NOT_ALLOWED` (method mismatch), and `ROUTED_RESPONSE_TOO_LARGE` (body over 6 MiB).
 
+#### Routed functions: locale awareness
+
+Declare supported locales as a `spec.i18n` release slice and the gateway negotiates a locale per routed-function request, then surfaces it to user code through two request headers. Add `i18n` to the deploy manifest alongside `functions` and `routes` and run `run402 deploy apply --manifest run402.deploy.json`:
+
+```json
+{
+  "project_id": "prj_...",
+  "functions": {
+    "replace": {
+      "api": {
+        "runtime": "node22",
+        "source": { "data": "export default async (req) => { const locale = req.headers.get('x-run402-locale'); const def = req.headers.get('x-run402-default-locale'); return Response.json({ locale, default: def }); }" }
+      }
+    }
+  },
+  "routes": {
+    "replace": [
+      { "pattern": "/api/*", "target": { "type": "function", "name": "api" } }
+    ]
+  },
+  "i18n": {
+    "defaultLocale": "en",
+    "locales": ["en", "es", "fr", "zh-Hant"],
+    "detect": ["cookie:wl_locale", "accept-language"]
+  }
+}
+```
+
+Carry-forward semantics: omit `i18n` to carry forward from base release; pass `"i18n": null` to clear the slice on the new release; pass `{ defaultLocale, locales, detect? }` to replace. Simpler than `routes` — no `{ replace }` envelope.
+
+Locale-tag rules (strict, no canonicalization):
+- `defaultLocale` MUST be byte-identical to one entry in `locales[]`. The gateway does NOT silently canonicalize; the CLI/SDK validate this client-side before planning.
+- Each tag MUST match `/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/`. Tags are opaque — no BCP-47 semantic validation.
+- `locales[]` is non-empty, max 50 entries.
+- Negotiation returns canonical casing from `locales[]`, NOT the request's casing.
+
+Detection (`detect[]`, default `["accept-language"]`, max 10, `[]` allowed and means "always default"):
+- Walked in order; first match wins.
+- `"accept-language"` parses per RFC 9110, drops `q=0` and `*`, sorts by q descending; applies RFC 4647 §3.4 lookup-style truncation (`zh-Hant-TW` → `zh-Hant` → `zh`); longest matching prefix wins. A generic request tag does NOT match a more-specific `locales[]` entry — `Accept-Language: es` does NOT match `locales: ["es-MX"]`.
+- `"cookie:<name>"` does a case-sensitive cookie-name lookup; the raw cookie value (no percent-decode) is matched case-insensitively against `locales[]`. Cookie names MUST match RFC 6265 grammar (`/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/`).
+
+Read the negotiated locale inside a routed function (single-arg `(req)` signature, not `(req, ctx)`):
+
+```ts
+export default async (req) => {
+  const locale = req.headers.get('x-run402-locale');
+  const defaultLocale = req.headers.get('x-run402-default-locale');
+  if (locale && locale !== defaultLocale) {
+    return renderWithTranslations({ locale });
+  }
+  return renderBase({ locale: defaultLocale ?? 'en' });
+};
+```
+
+`x-run402-locale` and `x-run402-default-locale` are OMITTED entirely when the active release has no `i18n` slice (additive-compat). The gateway injects them at request time, so already-deployed function bundles see new headers on the next deploy that adds `i18n` — no function redeploy required. The bundled `@run402/functions` runtime translates the routed envelope into a Web-standard `Request` before calling user code, so the routed-envelope `context.locale` is NOT visible to typical user functions — read the headers instead.
+
+Static-route hits do NOT receive locale negotiation; only routed HTTP function invocations do. Run402 does NOT inject `Vary` headers — apps that return public-cacheable responses varying by locale must set their own `Vary` until per-locale edge caching ships.
+
+#### Client-side gotcha: language switchers must write a cookie
+
+Apps that persist locale to `localStorage` only (a common pattern from Astro/Next i18n tutorials) won't be seen by Run402's server-side negotiation. Mirror the locale to a cookie so the next request hits the right translations, then declare a cookie source in `spec.i18n.detect`:
+
+```js
+function setLanguage(lang) {
+  localStorage.setItem('wl_locale', lang);
+  document.cookie =
+    `wl_locale=${encodeURIComponent(lang)}; path=/; max-age=31536000; samesite=lax`;
+}
+```
+
+```json
+{ "i18n": { "defaultLocale": "en", "locales": ["en", "es"], "detect": ["cookie:wl_locale", "accept-language"] } }
+```
+
 The deploy manifest is a v2 `ReleaseSpec`; put the auth manifest under `database.expose`:
 
 ```json

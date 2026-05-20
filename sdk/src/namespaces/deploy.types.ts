@@ -84,6 +84,12 @@ export interface ReleaseSpec {
    *  that flips live_release_id, so asset visibility flips at the exact
    *  moment release visibility flips. */
   assets?: AssetSpec;
+  /** v2.5+ routed-locale-context: declare supported locales, a default
+   *  locale, and detection sources. The gateway negotiates per request
+   *  and surfaces the result to routed HTTP functions via the
+   *  `x-run402-locale` / `x-run402-default-locale` request headers.
+   *  Omit to carry forward from base; `null` clears the slice. */
+  i18n?: I18nSpec | null;
 }
 
 /**
@@ -283,6 +289,58 @@ export interface SubdomainsSpec {
   add?: string[];
   /** Remove specific subdomains. */
   remove?: string[];
+}
+
+/**
+ * Where the gateway looks for the caller's locale during routed-function
+ * negotiation. Walked in order; the first match wins. Sources:
+ *
+ * - `"accept-language"` — parse per RFC 9110, drop `q=0` and `*`, sort by
+ *   q descending (stable on original order for ties); apply RFC 4647 §3.4
+ *   lookup-style truncation (`zh-Hant-TW` → `zh-Hant` → `zh`); longest
+ *   matching prefix wins. A generic request tag does NOT match a more
+ *   specific `locales[]` entry (`Accept-Language: es` does NOT match
+ *   `locales: ["es-MX"]`).
+ * - `cookie:<name>` — case-sensitive cookie name lookup; raw value (no
+ *   percent-decode) matched case-insensitively against `locales[]`.
+ *   Cookie name MUST match RFC 6265 grammar
+ *   (`/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/`).
+ */
+export type I18nDetectSource = "accept-language" | `cookie:${string}`;
+
+/** Backwards-friendly alias — the issue and gateway both call this `DetectSource`. */
+export type DetectSource = I18nDetectSource;
+
+/**
+ * Routed-locale-context release slice (v2.5+). Drives the negotiated
+ * locale that the gateway surfaces to routed HTTP function invocations
+ * via the `x-run402-locale` and `x-run402-default-locale` request headers.
+ *
+ * Carry-forward semantics (simpler than `routes` — no `{ replace }`
+ * envelope):
+ *
+ * - `i18n` omitted from a ReleaseSpec → carry forward from base release.
+ * - `i18n: null` → clear the slice on the new release.
+ * - `i18n: { ... }` → replace the slice with the provided value.
+ *
+ * The negotiated locale is returned in the canonical casing supplied here
+ * in `locales[]`, NOT the request's casing. Static-route hits do NOT
+ * receive locale negotiation; only routed HTTP function invocations do.
+ * Run402 does NOT inject `Vary` headers — apps that return public-
+ * cacheable responses varying by locale must set their own `Vary`.
+ */
+export interface I18nSpec {
+  /** Default locale tag. MUST be byte-identical to one entry in
+   *  `locales[]`. The platform does NOT silently canonicalize. */
+  defaultLocale: string;
+  /** Supported locale tags. Non-empty, ≤50 entries. Each tag MUST match
+   *  `/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/`. Tags are opaque — there is
+   *  NO BCP-47 semantic validation. */
+  locales: string[];
+  /** Detection sources, walked in order. Default `["accept-language"]`
+   *  when omitted, ≤10 entries. `[]` is allowed and means "always
+   *  default". */
+  detect?: I18nDetectSource[];
 }
 
 export const ROUTE_HTTP_METHODS = [
@@ -1923,6 +1981,10 @@ export interface NormalizedReleaseSpec {
    *  are wire-shaped `AssetPutEntry[]` (no `source` field — the SDK
    *  normalizer stripped them after registering byte-readers). */
   assets?: NormalizedAssetSpec;
+  /** v2.5 routed-locale-context: same shape as `ReleaseSpec.i18n`. Passed
+   *  through unchanged from caller to wire so the gateway can plan the
+   *  slice and downstream warnings/diffs can reference it. */
+  i18n?: I18nSpec | null;
 }
 
 export interface NormalizedAssetSpec {

@@ -15,6 +15,7 @@ import type {
   DatabaseSpec,
   FileSet,
   FunctionSpec,
+  I18nSpec,
   ReleaseRoutesSpec,
   ReleaseSpec,
   SitePublicPathsSpec,
@@ -37,7 +38,9 @@ const MANIFEST_FIELDS = new Set([
   "subdomains",
   "routes",
   "checks",
+  "i18n",
 ]);
+const MANIFEST_I18N_FIELDS = new Set(["defaultLocale", "locales", "detect"]);
 const MANIFEST_DATABASE_FIELDS = new Set(["migrations", "expose", "zero_downtime"]);
 const MANIFEST_MIGRATION_FIELDS = new Set([
   "id",
@@ -159,7 +162,7 @@ export interface DeployManifestAssetSpec {
 }
 
 export interface DeployManifestInput
-  extends Omit<ReleaseSpec, "project" | "database" | "functions" | "site" | "assets"> {
+  extends Omit<ReleaseSpec, "project" | "database" | "functions" | "site" | "assets" | "i18n"> {
   /** JSON Schema metadata for editors. Stripped before deploy planning. */
   $schema?: string;
   /** SDK-native project field. `project_id` is also accepted for MCP/CLI parity. */
@@ -170,6 +173,9 @@ export interface DeployManifestInput
   functions?: DeployManifestFunctionsSpec;
   site?: DeployManifestSiteSpec;
   assets?: DeployManifestAssetSpec;
+  /** Routed-locale-context slice. Omit to carry forward, `null` to clear,
+   *  `{ defaultLocale, locales, detect? }` to replace. */
+  i18n?: I18nSpec | null;
   /** CLI/MCP manifest idempotency key, returned separately for deploy options. */
   idempotency_key?: string;
   /** JS-friendly alias for `idempotency_key`. */
@@ -251,6 +257,7 @@ export async function normalizeDeployManifest(
   if (manifest.secrets !== undefined) spec.secrets = manifest.secrets;
   if (manifest.routes !== undefined) spec.routes = mapRoutes(manifest.routes);
   if (manifest.checks !== undefined) spec.checks = manifest.checks;
+  if (manifest.i18n !== undefined) spec.i18n = mapI18n(manifest.i18n);
 
   if (manifest.database !== undefined) {
     spec.database = await mapDatabase(manifest.database, opts);
@@ -709,6 +716,29 @@ function mapAssets(
     out.sync = sync;
   }
 
+  return out;
+}
+
+function mapI18n(i18n: unknown): I18nSpec | null {
+  if (i18n === null) return null;
+  assertPlainRecord(i18n, "Deploy manifest i18n");
+  assertKnownFields(i18n, "Deploy manifest i18n", MANIFEST_I18N_FIELDS, {
+    default_locale: "Use `defaultLocale` (camelCase) in i18n.",
+    default: "Use `defaultLocale` in i18n.",
+    locale: "Use `locales` (plural array) in i18n.",
+  });
+  const raw = i18n as { defaultLocale?: unknown; locales?: unknown; detect?: unknown };
+  const out: I18nSpec = {
+    defaultLocale: raw.defaultLocale as string,
+    locales: Array.isArray(raw.locales)
+      ? ([...raw.locales] as string[])
+      : (raw.locales as unknown as string[]),
+  };
+  if (raw.detect !== undefined) {
+    out.detect = Array.isArray(raw.detect)
+      ? ([...raw.detect] as I18nSpec["detect"])
+      : (raw.detect as I18nSpec["detect"]);
+  }
   return out;
 }
 

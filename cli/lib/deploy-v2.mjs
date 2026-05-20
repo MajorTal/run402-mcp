@@ -14,6 +14,7 @@
  *                  | { "public_paths": { "mode": "explicit", "replace": {} } },
  *     "subdomains": { "set": ["..."], "add": [...], "remove": [...] },
  *     "routes": { "replace": [{ "pattern": "/api/*", "methods": ["GET", "POST"], "target": { "type": "function", "name": "api" } }] },
+ *     "i18n": { "defaultLocale": "en", "locales": ["en", "es"], "detect": ["cookie:wl_locale", "accept-language"] },
  *     "idempotency_key": "..."
  *   }
  *
@@ -112,6 +113,14 @@ Routes:
   Routed functions use Node 22 Fetch Request -> Response. req.url is the full public URL on managed domains, deployment hosts, and verified custom domains.
   Routes activate atomically with the release. Direct /functions/v1/:name remains API-key protected.
   Runtime route failure codes: ROUTE_MANIFEST_LOAD_FAILED, ROUTED_INVOKE_WORKER_SECRET_MISSING, ROUTED_INVOKE_AUTH_FAILED, ROUTED_ROUTE_STALE, ROUTE_METHOD_NOT_ALLOWED, ROUTED_RESPONSE_TOO_LARGE.
+
+Internationalization (routed functions):
+  "i18n": { "defaultLocale": "en", "locales": ["en", "es", "fr"], "detect": ["cookie:wl_locale", "accept-language"] }
+  Omit i18n to carry forward from base release; pass "i18n": null to clear the slice on the new release.
+  defaultLocale MUST be byte-identical to one entry in locales[]. Locale tags must match /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, max 50 tags; no BCP-47 semantic validation.
+  detect[] (default ["accept-language"], max 10, [] means "always default"): walked in order, first match wins. Sources: "accept-language" and "cookie:<name>" (RFC 6265 cookie-name grammar).
+  Routed functions read the negotiated locale via request headers: req.headers.get("x-run402-locale") and req.headers.get("x-run402-default-locale"). Headers are omitted when no i18n slice is active.
+  Static-route hits do NOT receive locale negotiation; only routed HTTP function invocations do. Run402 does NOT inject Vary headers.
 `;
 
 const RESUME_HELP = `run402 deploy resume — Resume a stuck deploy operation
@@ -418,7 +427,7 @@ async function applyCmd(args) {
   // For object-typed sections the "container is non-empty" check isn't enough
   // — `site:{replace:{}}` has one key but ships nothing. We recurse one level
   // so any object whose own values are all empty containers is still empty.
-  const meaningful = ["database", "site", "functions", "secrets", "subdomains", "routes", "checks"];
+  const meaningful = ["database", "site", "functions", "secrets", "subdomains", "routes", "checks", "i18n"];
   function hasContent(v) {
     if (v == null) return false;
     if (Array.isArray(v)) return v.length > 0;
@@ -435,6 +444,8 @@ async function applyCmd(args) {
       Object.prototype.hasOwnProperty.call(value, "replace") && Array.isArray(value.replace)) {
       return true;
     }
+    // `i18n: null` clears the slice — that's a valid deploy on its own.
+    if (key === "i18n" && value === null) return true;
     return hasContent(value);
   }
   const hasMeaningfulContent = spec && typeof spec === "object" && !Array.isArray(spec) &&

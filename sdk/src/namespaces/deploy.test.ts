@@ -2183,6 +2183,229 @@ describe("Deploy.apply (validation)", () => {
   });
 });
 
+describe("Deploy.apply (i18n validation)", () => {
+  function expectInvalidI18nSpec(
+    spec: unknown,
+    resource: string,
+    pattern: RegExp,
+  ) {
+    return async () => {
+      const w = makeWiring();
+      const deploy = new Deploy(w.client);
+      await assert.rejects(
+        () => deploy.apply(spec as never),
+        (err: unknown) => {
+          assert(err instanceof Run402DeployError);
+          assert.equal(err.code, "INVALID_SPEC");
+          assert.equal(err.phase, "validate");
+          assert.equal(err.resource, resource);
+          assert.match(err.message, pattern);
+          return true;
+        },
+      );
+      assert.equal(w.requests.length, 0);
+    };
+  }
+
+  it(
+    "rejects defaultLocale not in locales (byte-identical requirement)",
+    expectInvalidI18nSpec(
+      {
+        project: "prj_test",
+        i18n: { defaultLocale: "EN", locales: ["en", "es"] },
+      },
+      "i18n.defaultLocale",
+      /byte-identical to one entry/,
+    ),
+  );
+
+  it(
+    "rejects empty locales[]",
+    expectInvalidI18nSpec(
+      {
+        project: "prj_test",
+        i18n: { defaultLocale: "en", locales: [] },
+      },
+      "i18n.locales",
+      /at least one entry/,
+    ),
+  );
+
+  it(
+    "rejects locale tags that violate the safety regex",
+    expectInvalidI18nSpec(
+      {
+        project: "prj_test",
+        i18n: { defaultLocale: "en", locales: ["en", "es!"] },
+      },
+      "i18n.locales.1",
+      /must match/,
+    ),
+  );
+
+  it(
+    "rejects duplicate locale tags",
+    expectInvalidI18nSpec(
+      {
+        project: "prj_test",
+        i18n: { defaultLocale: "en", locales: ["en", "en"] },
+      },
+      "i18n.locales.1",
+      /duplicate entry/,
+    ),
+  );
+
+  it("rejects more than 50 locale entries", async () => {
+    const w = makeWiring();
+    const deploy = new Deploy(w.client);
+    const locales = Array.from({ length: 51 }, (_, i) => `loc${i}`);
+    await assert.rejects(
+      () =>
+        deploy.apply({
+          project: "prj_test",
+          i18n: { defaultLocale: "loc0", locales },
+        }),
+      (err: unknown) => {
+        assert(err instanceof Run402DeployError);
+        assert.equal(err.code, "INVALID_SPEC");
+        assert.equal(err.resource, "i18n.locales");
+        assert.match(err.message, /at most 50 entries/);
+        return true;
+      },
+    );
+  });
+
+  it(
+    "rejects unknown detect source",
+    expectInvalidI18nSpec(
+      {
+        project: "prj_test",
+        i18n: {
+          defaultLocale: "en",
+          locales: ["en"],
+          detect: ["header:x-locale"],
+        },
+      },
+      "i18n.detect.0",
+      /accept-language.*cookie/,
+    ),
+  );
+
+  it(
+    "rejects cookie source with invalid RFC 6265 cookie name",
+    expectInvalidI18nSpec(
+      {
+        project: "prj_test",
+        i18n: {
+          defaultLocale: "en",
+          locales: ["en"],
+          detect: ["cookie:bad name"],
+        },
+      },
+      "i18n.detect.0",
+      /RFC 6265/,
+    ),
+  );
+
+  it(
+    "rejects cookie source with empty cookie name",
+    expectInvalidI18nSpec(
+      {
+        project: "prj_test",
+        i18n: {
+          defaultLocale: "en",
+          locales: ["en"],
+          detect: ["cookie:"],
+        },
+      },
+      "i18n.detect.0",
+      /cookie name/,
+    ),
+  );
+
+  it("rejects more than 10 detect sources", async () => {
+    const w = makeWiring();
+    const deploy = new Deploy(w.client);
+    const detect = Array.from({ length: 11 }, () => "accept-language" as const);
+    await assert.rejects(
+      () =>
+        deploy.apply({
+          project: "prj_test",
+          i18n: { defaultLocale: "en", locales: ["en"], detect },
+        }),
+      (err: unknown) => {
+        assert(err instanceof Run402DeployError);
+        assert.equal(err.code, "INVALID_SPEC");
+        assert.equal(err.resource, "i18n.detect");
+        assert.match(err.message, /at most 10 entries/);
+        return true;
+      },
+    );
+  });
+
+  it(
+    "rejects unknown i18n field",
+    expectInvalidI18nSpec(
+      {
+        project: "prj_test",
+        i18n: { defaultLocale: "en", locales: ["en"], default_locale: "en" },
+      },
+      "i18n.default_locale",
+      /Use `defaultLocale`/,
+    ),
+  );
+
+  it("plans, uploads, commits a minimal i18n-only deploy and round-trips the slice on the wire", async () => {
+    const w = makeWiring();
+    let plannedBody: unknown;
+    w.setHandler((req) => {
+      if (req.path === "/apply/v1/plans") {
+        plannedBody = req.body;
+        return noContentPlan("plan_1", "op_1");
+      }
+      if (req.path === "/apply/v1/plans/plan_1/commit") {
+        return readyCommit("op_1", "rel_1");
+      }
+      throw new Error(`unexpected ${req.path}`);
+    });
+    const deploy = new Deploy(w.client);
+    const result = await deploy.apply({
+      project: "prj_test",
+      i18n: {
+        defaultLocale: "en",
+        locales: ["en", "es", "fr"],
+        detect: ["cookie:wl_locale", "accept-language"],
+      },
+    });
+    assert.equal(result.release_id, "rel_1");
+    const body = plannedBody as { spec?: { i18n?: unknown } };
+    assert.deepEqual(body.spec?.i18n, {
+      defaultLocale: "en",
+      locales: ["en", "es", "fr"],
+      detect: ["cookie:wl_locale", "accept-language"],
+    });
+  });
+
+  it("treats i18n: null as a deployable clear-the-slice spec", async () => {
+    const w = makeWiring();
+    let plannedBody: unknown;
+    w.setHandler((req) => {
+      if (req.path === "/apply/v1/plans") {
+        plannedBody = req.body;
+        return noContentPlan("plan_2", "op_2");
+      }
+      if (req.path === "/apply/v1/plans/plan_2/commit") {
+        return readyCommit("op_2", "rel_2");
+      }
+      throw new Error(`unexpected ${req.path}`);
+    });
+    const deploy = new Deploy(w.client);
+    await deploy.apply({ project: "prj_test", i18n: null });
+    const body = plannedBody as { spec?: { i18n?: unknown } };
+    assert.equal(body.spec?.i18n, null);
+  });
+});
+
 describe("Deploy.apply (plan warnings)", () => {
   it("aborts before commit on client-detected wildcard route method warnings", async () => {
     const w = makeWiring();

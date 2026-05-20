@@ -49,4 +49,29 @@ describe("ReleaseSpec JSON Schema", () => {
     assert.match(schema.$defs.staticCacheClass.description, /immutable_versioned/);
     assert.match(schema.$defs.staticCacheClass.description, /revalidating_asset/);
   });
+
+  it("declares routed-locale-context i18n slice with the platform's tag/cookie rules", () => {
+    const schema = readSchema();
+    assert.ok(schema.properties.i18n, "i18n is a top-level property");
+
+    const i18n = schema.$defs.i18n;
+    assert.ok(i18n, "$defs.i18n is defined");
+    assert.equal(i18n.additionalProperties, false);
+    assert.deepEqual(i18n.required, ["defaultLocale", "locales"]);
+    assert.equal(i18n.properties.defaultLocale.pattern, "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+    assert.equal(i18n.properties.locales.minItems, 1);
+    assert.equal(i18n.properties.locales.maxItems, 50);
+    assert.equal(i18n.properties.locales.items.pattern, "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$");
+    assert.equal(i18n.properties.detect.maxItems, 10);
+    assert.equal(
+      i18n.properties.detect.items.pattern,
+      "^(accept-language|cookie:[!#$%&'*+\\-.^_`|~0-9A-Za-z]+)$",
+    );
+
+    // Top-level i18n accepts null (clear-the-slice) per the carry-forward
+    // semantics shipped with v2.5.
+    const oneOf = schema.properties.i18n.oneOf;
+    assert.ok(Array.isArray(oneOf));
+    assert.ok(oneOf.some((entry: { type?: string }) => entry.type === "null"));
+  });
 });
