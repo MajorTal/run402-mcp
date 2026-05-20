@@ -377,6 +377,7 @@ For agents that sign Ethereum transactions. Private keys never leave AWS KMS. **
 - **`set_recovery_address`** — set/clear the optional auto-drain address used at day-90 deletion.
 - **`set_low_balance_alert`** — wei threshold; email alerts on drop (24h cooldown).
 - **`contract_call`** — submit a write call. Idempotent on `idempotency_key`. Params: `project_id`, `wallet_id`, `chain`, `contract_address`, `abi_fragment`, `function_name`, `args`, `value_wei?`, `idempotency_key?`.
+- **`contract_deploy`** — deploy a contract from the wallet (signs `to: null + data: bytecode` creation tx). Same pricing + idempotency as `contract_call`. Params: `project_id`, `wallet_id`, `chain`, `bytecode` (0x-prefixed hex; full creation calldata = creation bytecode + ABI-encoded constructor args, concatenated client-side; ≤ 128 KB), `value?`, `idempotency_key?`. Returns `contract_address` synchronously (deterministic CREATE address from `(wallet, nonce)`). run402 does NOT compile Solidity — bring your own bytecode.
 - **`contract_read`** — read-only call (free).
 - **`get_contract_call_status`** — lifecycle, gas, receipt.
 - **`drain_contract_wallet`** — drain native balance. Works on suspended wallets — the safety valve. Requires `X-Confirm-Drain` header equivalent.

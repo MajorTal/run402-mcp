@@ -194,6 +194,7 @@ import { listContractWalletsSchema, handleListContractWallets } from "./tools/li
 import { setRecoveryAddressSchema, handleSetRecoveryAddress } from "./tools/set-recovery-address.js";
 import { setLowBalanceAlertSchema, handleSetLowBalanceAlert } from "./tools/set-low-balance-alert.js";
 import { contractCallSchema, handleContractCall } from "./tools/contract-call.js";
+import { contractDeploySchema, handleContractDeploy } from "./tools/contract-deploy.js";
 import { contractReadSchema, handleContractRead } from "./tools/contract-read.js";
 import { getContractCallStatusSchema, handleGetContractCallStatus } from "./tools/get-contract-call-status.js";
 import { drainContractWalletSchema, handleDrainContractWallet } from "./tools/drain-contract-wallet.js";
@@ -1133,6 +1134,13 @@ server.tool(
   "Submit a smart-contract write call from a KMS wallet. The gateway encodes via viem, signs the digest via AWS KMS, and broadcasts. Idempotent on optional idempotency_key. Cost: chain gas at-cost + $0.000005 KMS sign fee per call.",
   contractCallSchema,
   async (args) => handleContractCall(args),
+);
+
+server.tool(
+  "contract_deploy",
+  "Deploy a smart contract from a KMS wallet (signs a contract-creation tx with `to: null + data: bytecode`). The `bytecode` is full creation calldata — creation bytecode + ABI-encoded constructor args, concatenated client-side (run402 does NOT compile Solidity). Returns the deterministic CREATE address synchronously in `contract_address` — known before confirmation, no polling needed to know where the contract lives. Same pricing as `contract_call`: chain gas at-cost + $0.000005 KMS sign fee.",
+  contractDeploySchema,
+  async (args) => handleContractDeploy(args),
 );
 
 server.tool(

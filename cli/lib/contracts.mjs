@@ -31,6 +31,8 @@ Subcommands:
     Set the low-balance alert threshold (in wei).
   call <project_id> <wallet_id> --to 0x... --abi <json> --fn <name> --args <json> [--value-wei <n>] [--idempotency-key <k>]
     Submit a contract write call (chain gas + $0.000005 KMS sign fee).
+  deploy <project_id> <wallet_id> --bytecode 0x... [--chain <base-mainnet|base-sepolia>] [--value-wei <n>] [--idempotency-key <k>]
+    Deploy a contract (chain gas + $0.000005 KMS sign fee). Returns deterministic CREATE address synchronously.
   read --chain <chain> --to 0x... --abi <json> --fn <name> --args <json>
     Read-only contract call (free).
   status <project_id> <call_id>
@@ -74,6 +76,28 @@ Usage:
 Usage:
   run402 contracts call <project_id> <wallet_id> --to 0x... --abi <json>
     --fn <name> --args <json> [options]
+`,
+  deploy: `run402 contracts deploy — Deploy a smart contract from a KMS wallet
+
+KMS-signs a contract-creation transaction (to: null + data: bytecode) and broadcasts.
+Returns the deterministic CREATE address synchronously — known from (wallet, nonce)
+before the tx confirms. Cost: chain gas at-cost + $0.000005 KMS sign fee.
+
+Usage:
+  run402 contracts deploy <project_id> <wallet_id> --bytecode 0x... [options]
+
+Options:
+  --bytecode 0x...        Full creation calldata as 0x-prefixed hex (creation
+                          bytecode + ABI-encoded constructor args, concatenated
+                          client-side via viem/ethers). Required. ≤ 128 KB.
+  --chain <chain>         base-mainnet (default) or base-sepolia. Must match
+                          the wallet's chain.
+  --value-wei <n>         Optional native-token value in wei to attach.
+  --idempotency-key <k>   Optional. Same key + same bytecode returns the
+                          existing call without re-broadcasting.
+
+run402 does NOT compile Solidity — bring your own bytecode (compile via
+hardhat/foundry/solc then concat constructor args via viem/ethers).
 `,
   read: `run402 contracts read — Read-only contract call (free)
 
@@ -313,6 +337,41 @@ async function call(projectId, walletId, args) {
   }
 }
 
+async function deploy(projectId, walletId, args) {
+  const parsedArgs = normalizeArgv(args);
+  const valueFlags = ["--bytecode", "--value-wei", "--chain", "--idempotency-key"];
+  assertKnownFlags(parsedArgs, [...valueFlags, "--help", "-h"], valueFlags);
+  const extra = positionalArgs(parsedArgs, valueFlags);
+  if (extra.length > 0) {
+    fail({ code: "BAD_USAGE", message: `Unexpected argument for contracts deploy: ${extra[0]}` });
+  }
+  const bytecode = flagValue(parsedArgs, "--bytecode");
+  const value = flagValue(parsedArgs, "--value-wei");
+  const chain = flagValue(parsedArgs, "--chain") || "base-mainnet";
+  const idempotency = flagValue(parsedArgs, "--idempotency-key");
+  if (!bytecode) {
+    fail({
+      code: "BAD_USAGE",
+      message: "Required flag: --bytecode (0x-prefixed hex; full creation calldata = creation bytecode + ABI-encoded constructor args, concatenated client-side).",
+      hint: "Cost: chain gas + $0.000005 KMS sign fee. Returns deterministic CREATE address synchronously.",
+    });
+  }
+  assertAllowedValue(chain, ["base-mainnet", "base-sepolia"], "--chain");
+  if (value !== null) validateWeiFlag("--value-wei", value);
+  try {
+    const data = await getSdk().contracts.deploy(projectId, {
+      walletId,
+      chain,
+      bytecode,
+      value: value ?? undefined,
+      idempotencyKey: idempotency ?? undefined,
+    });
+    console.log(JSON.stringify(data, null, 2));
+  } catch (err) {
+    reportSdkError(err);
+  }
+}
+
 async function read(args) {
   const parsedArgs = normalizeArgv(args);
   const valueFlags = ["--chain", "--to", "--abi", "--fn", "--args"];
@@ -418,6 +477,7 @@ export async function run(sub, args) {
     case "set-recovery":     await setRecovery(args[0], args[1], args.slice(2)); break;
     case "set-alert":        await setAlert(args[0], args[1], args.slice(2)); break;
     case "call":             await call(args[0], args[1], args.slice(2)); break;
+    case "deploy":           await deploy(args[0], args[1], args.slice(2)); break;
     case "read":             await read(args); break;
     case "status":           await status(args[0], args[1], args.slice(2)); break;
     case "drain":            await drain(args[0], args[1], args.slice(2)); break;

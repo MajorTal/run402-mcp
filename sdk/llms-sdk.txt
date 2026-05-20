@@ -1116,6 +1116,7 @@ setRecovery(projectId, walletId, recoveryAddress: string | null): Promise<void>
 setLowBalanceAlert(projectId, walletId, thresholdWei: string): Promise<void>
 
 call(projectId, opts: { walletId, chain, contractAddress?, to?, abiFragment?, abi?, functionName?, fn?, args, value?, idempotencyKey? }): Promise<ContractCallResult>
+deploy(projectId, opts: { walletId, chain, bytecode, value?, idempotencyKey? }): Promise<ContractDeployResult>  // bytecode = full creation calldata (creation bytecode + ABI-encoded ctor args concatenated by caller); ≤ 128 KB. Returns deterministic CREATE address synchronously in `contract_address`.
 read(opts: { chain, contractAddress?, to?, abiFragment?, abi?, functionName?, fn?, args }): Promise<ContractReadResult>
 callStatus(projectId, callId): Promise<ContractCallResult>
 drain(projectId, walletId, destinationAddress): Promise<DrainResult>

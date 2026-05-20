@@ -450,6 +450,7 @@ For agents that need to sign Ethereum transactions. Private keys never leave AWS
 - **`get_contract_wallet`** / **`list_contract_wallets`** — metadata + live balance + USD value.
 - **`set_recovery_address`** / **`set_low_balance_alert`** — optional safety nets.
 - **`contract_call`** — submit a write call (chain gas at-cost + KMS sign fee). Idempotent on `idempotency_key`.
+- **`contract_deploy`** — deploy a contract from the wallet (signs `to: null + bytecode` creation tx). Returns deterministic CREATE address synchronously. Same pricing as `contract_call`. Caller supplies pre-compiled bytecode + ABI-encoded constructor args (run402 doesn't compile Solidity).
 - **`contract_read`** — read-only call (free).
 - **`get_contract_call_status`** — lifecycle, gas, receipt.
 - **`drain_contract_wallet`** — drain native balance (works on suspended wallets — the safety valve).

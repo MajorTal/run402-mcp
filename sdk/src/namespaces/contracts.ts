@@ -90,6 +90,35 @@ export interface ContractCallOptions {
   idempotencyKey?: string;
 }
 
+export interface ContractDeployOptions {
+  /** The cwlt_… ID of the KMS wallet that will sign + own the new contract. */
+  walletId: string;
+  /** The chain to deploy to. Must match the wallet's chain. */
+  chain: EvmChain;
+  /**
+   * Full creation calldata as a 0x-prefixed hex string: creation bytecode
+   * concatenated with ABI-encoded constructor args (the caller does the
+   * encoding via viem/ethers etc.). Non-empty, even-length, ≤ 128 KB.
+   *
+   * run402 does NOT compile Solidity — bring your own bytecode.
+   */
+  bytecode: string;
+  /** Optional native-token value to attach to the deploy tx (in wei). */
+  value?: string;
+  /** Optional idempotency key — same key + same payload returns the existing call. */
+  idempotencyKey?: string;
+}
+
+export interface ContractDeployResult extends ContractCallResult {
+  /**
+   * The deterministic CREATE address derived from `(wallet.address, nonce)`.
+   * Returned synchronously — the caller knows where the new contract will
+   * live without waiting for confirmation. The reconciler verifies this
+   * matches the on-chain receipt's `contractAddress` on confirmation.
+   */
+  contract_address: string;
+}
+
 export interface ContractReadOptions {
   chain: EvmChain;
   contractAddress?: string;
@@ -228,6 +257,60 @@ export class Contracts {
       headers,
       body,
       context: "submitting contract call",
+    });
+  }
+
+  /**
+   * Deploy a contract from the wallet (KMS-signs a contract-creation tx).
+   *
+   * The `bytecode` is the full creation calldata — creation bytecode
+   * concatenated with ABI-encoded constructor args (the caller does the
+   * encoding via viem/ethers etc.; run402 does NOT compile Solidity).
+   *
+   * Returns synchronously with the deterministic CREATE address derived
+   * from `(wallet.address, nonce)` — no need to wait for confirmation
+   * to know where the contract will live. Reconciler verifies on receipt.
+   *
+   * Same pricing as `call`: chain gas at-cost + $0.000005 KMS sign fee.
+   * Idempotent on `idempotencyKey`.
+   */
+  async deploy(projectId: string, opts: ContractDeployOptions): Promise<ContractDeployResult> {
+    if (typeof opts.bytecode !== "string" || opts.bytecode.length === 0) {
+      throw new LocalError("contracts.deploy requires non-empty bytecode (hex string)", "deploying contract");
+    }
+    if (!/^0x[0-9a-fA-F]+$/.test(opts.bytecode)) {
+      throw new LocalError("contracts.deploy bytecode must be 0x-prefixed hex", "deploying contract");
+    }
+    if (opts.bytecode.length % 2 !== 0) {
+      throw new LocalError("contracts.deploy bytecode must be even-length hex", "deploying contract");
+    }
+    const MAX_BYTES = 128 * 1024;
+    if ((opts.bytecode.length - 2) / 2 > MAX_BYTES) {
+      throw new LocalError(`contracts.deploy bytecode exceeds ${MAX_BYTES}-byte cap`, "deploying contract");
+    }
+    assertStringInSet(opts.chain, EVM_CHAINS, "chain", "deploying contract");
+
+    const project = await this.client.getProject(projectId);
+    if (!project) throw new ProjectNotFound(projectId, "deploying contract");
+
+    const headers: Record<string, string> = { Authorization: `Bearer ${project.service_key}` };
+    if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
+
+    const body: Record<string, unknown> = {
+      wallet_id: opts.walletId,
+      chain: opts.chain,
+      bytecode: opts.bytecode,
+    };
+    if (opts.value !== undefined) {
+      assertWeiString(opts.value, "value", "deploying contract");
+      body.value = opts.value;
+    }
+
+    return this.client.request<ContractDeployResult>("/contracts/v1/deploy", {
+      method: "POST",
+      headers,
+      body,
+      context: "deploying contract",
     });
   }
 
