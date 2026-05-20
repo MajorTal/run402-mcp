@@ -76,12 +76,26 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          # Node 24 ships npm 11.x. OIDC publish (the trusted-publisher
+          # token exchange) requires npm 11.5.1+; npm 10.x (bundled with
+          # Node 22) can still sign provenance attestations but doesn't
+          # know how to exchange the OIDC token for an npm publish
+          # credential — the publish then falls through to a missing
+          # token auth and 404s. Pinning to Node 24 is the cleanest way
+          # to guarantee the right npm.
+          node-version: '24'
           # registry-url tells setup-node to write a project-level .npmrc
           # that points at npmjs.org. Required for OIDC token exchange.
           # Without this, `npm publish` may resolve to a different default
           # registry on the runner.
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify npm has OIDC publish support
+        run: |
+          NPM_VER=$(npm --version)
+          echo "npm version: $NPM_VER"
+          # node -e exits non-zero (and the step fails) if npm <11.5.1.
+          node -e "const [a,b,c] = process.argv[1].split('.').map(Number); if (a < 11 || (a === 11 && b < 5) || (a === 11 && b === 5 && c < 1)) { console.error('npm '+process.argv[1]+' lacks OIDC trusted-publisher exchange (needs 11.5.1+)'); process.exit(1); }" "$NPM_VER"
 
       - name: Configure git for commit + push
         run: |
