@@ -1,0 +1,254 @@
+# Publish run402-mcp + run402 + @run402/sdk to npm via Trusted Publisher OIDC.
+#
+# Triggered manually via `gh workflow run publish.yml -f bump=<patch|minor|major>`.
+# This is the canonical publish path for the three repo packages as of v2.4.0+
+# (matching the same OIDC model used by .github/workflows/publish-astro.yml).
+#
+# WHY OIDC INSTEAD OF STORED TOKENS:
+# No npm token stored as a GitHub Secret. The job exchanges its short-lived
+# GitHub OIDC token for an even-shorter-lived npm publish credential at the
+# moment of publish. npm verifies the exchange against the Trusted Publisher
+# configuration on each package's npm settings (org `kychee-com`, repo
+# `run402`, this workflow file). If any of those match-claims diverge, the
+# exchange fails. Forking the repo, copying the workflow into a different
+# repo, or running an unauthorized branch all fail the npm-side check.
+#
+# WHY id-token: write:
+# Required for GitHub to mint the OIDC token. WITHOUT this permission the
+# token isn't issued and `npm publish` falls back to looking for a stored
+# auth token — which doesn't exist here, so the publish would 401.
+#
+# WHY contents: write:
+# Used to commit the version bump back to main + push the v<x.y.z> tag.
+# The default GITHUB_TOKEN has this permission when the workflow declares it.
+#
+# LOCKSTEP MODEL:
+# The three packages ship at the same version. The workflow reads the root
+# package.json version, applies the bump kind, and mirrors that exact target
+# to cli/package.json + sdk/package.json. No per-package bump option — for a
+# subset release, run `npm publish` manually with --otp until we add a
+# selective workflow input.
+
+name: Publish run402-mcp + run402 + @run402/sdk
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump kind (lockstep across all three packages)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: 'Dry run (build + smoke test only; no publish, no commit, no tag)'
+        type: boolean
+        default: false
+
+# Only one publish at a time. A second invocation queues behind any in-flight
+# publish so the version-bump commits stay ordered.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Bump, smoke, publish, tag
+    runs-on: ubuntu-latest
+    # Restrict to main. Workflow_dispatch can target any branch in the UI,
+    # but we want the canonical published commit to come from main.
+    if: github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # Need history depth for `npm version` to look sane and for the
+          # commit-then-push step to operate against the current HEAD.
+          fetch-depth: 0
+          # Use the default GITHUB_TOKEN for the push back. Repo settings
+          # must allow Actions to push to main (Settings → Actions → General
+          # → Workflow permissions → Read and write).
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          # Node 24 ships npm 11.x. OIDC publish (the trusted-publisher
+          # token exchange) requires npm 11.5.1+; npm 10.x (bundled with
+          # Node 22) can still sign provenance attestations but doesn't
+          # know how to exchange the OIDC token for an npm publish
+          # credential — the publish then falls through to a missing
+          # token auth and 404s. Pinning to Node 24 is the cleanest way
+          # to guarantee the right npm.
+          node-version: '24'
+          # registry-url tells setup-node to write a project-level .npmrc
+          # that points at npmjs.org. Required for OIDC token exchange.
+          # Without this, `npm publish` may resolve to a different default
+          # registry on the runner.
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify npm has OIDC publish support
+        run: |
+          NPM_VER=$(npm --version)
+          echo "npm version: $NPM_VER"
+          # node -e exits non-zero (and the step fails) if npm <11.5.1.
+          node -e "const [a,b,c] = process.argv[1].split('.').map(Number); if (a < 11 || (a === 11 && b < 5) || (a === 11 && b === 5 && c < 1)) { console.error('npm '+process.argv[1]+' lacks OIDC trusted-publisher exchange (needs 11.5.1+)'); process.exit(1); }" "$NPM_VER"
+
+      - name: Configure git for commit + push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Build all packages
+        # `npm run build` runs build:core + build:sdk + tsc (mcp) and stages
+        # the per-package core-dist / sdk/dist mirrors that prepack uses.
+        run: npm run build
+
+      - name: Bump version (lockstep)
+        id: bump
+        run: |
+          set -euo pipefail
+          CUR=$(node -p "require('./package.json').version")
+          # `npm version <kind> --no-git-tag-version` on the root modifies
+          # the root package.json. We then mirror the exact NEW version to
+          # cli/package.json and sdk/package.json via `node -e` (not `npm
+          # version` from inside those dirs — that would bump from the
+          # subpackage's current version, which can diverge after subset
+          # releases).
+          npm version "${{ inputs.bump }}" --no-git-tag-version >/dev/null
+          NEW=$(node -p "require('./package.json').version")
+          node -e "
+            const fs = require('fs');
+            for (const path of ['cli/package.json', 'sdk/package.json']) {
+              const pkg = JSON.parse(fs.readFileSync(path, 'utf8'));
+              pkg.version = '$NEW';
+              fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + '\n');
+              console.log('Bumped ' + path + ' to ' + pkg.version);
+            }
+          "
+          echo "Lockstep bump: $CUR → $NEW"
+          echo "old=$CUR" >> "$GITHUB_OUTPUT"
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+
+      - name: Sync lockfile to reflect new versions
+        run: npm install --package-lock-only
+
+      - name: Rebuild after bump
+        # The bump updated package.json files but didn't touch dist/ — the
+        # version string is read from package.json at runtime by the CLI's
+        # --version flag, so we re-run build to refresh any embedded
+        # version metadata in declaration files.
+        run: npm run build
+
+      - name: Tarball smoke test
+        run: |
+          set -euo pipefail
+          NEW="${{ steps.bump.outputs.new }}"
+          SMOKE=/tmp/smoke-$NEW
+          rm -rf "$SMOKE" && mkdir "$SMOKE"
+
+          # Pack all three tarballs into the same scratch dir.
+          npm pack --pack-destination "$SMOKE"                # run402-mcp
+          (cd cli && npm pack --pack-destination "$SMOKE")    # run402
+          (cd sdk && npm pack --pack-destination "$SMOKE")    # @run402/sdk
+          ls -la "$SMOKE"
+
+          # CLI: extract, install, --version must report the new version.
+          mkdir "$SMOKE/cli" && tar xzf "$SMOKE/run402-$NEW.tgz" -C "$SMOKE/cli"
+          (cd "$SMOKE/cli/package" && npm install --omit=dev)
+          ACTUAL=$(node "$SMOKE/cli/package/cli.mjs" --version)
+          if [ "$ACTUAL" != "$NEW" ]; then
+            echo "CLI --version mismatch: expected $NEW, got $ACTUAL"
+            exit 1
+          fi
+          echo "CLI smoke OK: $ACTUAL"
+
+          # MCP: extract, install, verify getSdk resolves (don't boot the
+          # stdio server — it doesn't exit).
+          mkdir "$SMOKE/mcp" && tar xzf "$SMOKE/run402-mcp-$NEW.tgz" -C "$SMOKE/mcp"
+          (cd "$SMOKE/mcp/package" && npm install --omit=dev)
+          (cd "$SMOKE/mcp/package" && node -e "import('./dist/sdk.js').then(m => { if (typeof m.getSdk !== 'function') { console.error('getSdk is not a function'); process.exit(1); } console.log('MCP smoke OK'); }).catch(e => { console.error('Import failed:', e.message); process.exit(1); })")
+
+          # SDK: extract, install, verify both entry points.
+          mkdir "$SMOKE/sdk" && tar xzf "$SMOKE/run402-sdk-$NEW.tgz" -C "$SMOKE/sdk"
+          (cd "$SMOKE/sdk/package" && npm install --omit=dev)
+          (cd "$SMOKE/sdk/package" && node -e "import('./dist/node/index.js').then(m => { if (typeof m.run402 !== 'function') { console.error('node run402 export is not a function'); process.exit(1); } console.log('SDK /node smoke OK'); }).catch(e => { console.error('Import failed:', e.message); process.exit(1); })")
+          (cd "$SMOKE/sdk/package" && node -e "import('./dist/index.js').then(m => { if (typeof m.Run402 !== 'function') { console.error('iso Run402 export is not a function'); process.exit(1); } console.log('SDK iso smoke OK'); }).catch(e => { console.error('Import failed:', e.message); process.exit(1); })")
+
+      - name: Publish run402-mcp to npm
+        if: ${{ !inputs.dry_run }}
+        # --provenance is optional under OIDC (provenance is generated
+        # implicitly), but the flag makes the intent explicit and would
+        # cause the publish to fail loudly if OIDC isn't actually wired
+        # — which is exactly what we want during the first few CI runs.
+        # --access public is redundant for these public packages but
+        # harmless and self-documenting.
+        run: npm publish --access public --provenance
+
+      - name: Publish run402 to npm
+        if: ${{ !inputs.dry_run }}
+        run: cd cli && npm publish --access public --provenance
+
+      - name: Publish @run402/sdk to npm
+        if: ${{ !inputs.dry_run }}
+        run: cd sdk && npm publish --access public --provenance
+
+      - name: Commit version bump
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git add package.json cli/package.json sdk/package.json package-lock.json
+          git commit -m "chore: bump version to v${{ steps.bump.outputs.new }}"
+          git push origin main
+
+      - name: Tag and push
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          git tag "v${{ steps.bump.outputs.new }}"
+          git push origin "v${{ steps.bump.outputs.new }}"
+
+      - name: Create GitHub release
+        if: ${{ !inputs.dry_run }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.bump.outputs.new }}
+          name: 'v${{ steps.bump.outputs.new }}'
+          generate_release_notes: true
+          target_commitish: main
+
+      - name: Summary
+        run: |
+          NEW="${{ steps.bump.outputs.new }}"
+          OLD="${{ steps.bump.outputs.old }}"
+          DRY="${{ inputs.dry_run }}"
+          {
+            echo "## run402 lockstep publish summary"
+            echo ""
+            echo "- **Bump:** \`${{ inputs.bump }}\` ($OLD → $NEW)"
+            echo "- **Dry run:** $DRY"
+            if [ "$DRY" = "true" ]; then
+              echo ""
+              echo "_Dry run — no publish, no commit, no tag was made._"
+            else
+              echo "- **run402-mcp:** https://www.npmjs.com/package/run402-mcp/v/$NEW"
+              echo "- **run402:** https://www.npmjs.com/package/run402/v/$NEW"
+              echo "- **@run402/sdk:** https://www.npmjs.com/package/@run402/sdk/v/$NEW"
+              echo "- **Tag:** \`v$NEW\`"
+              echo "- **Provenance attestation:** auto-generated via OIDC"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
