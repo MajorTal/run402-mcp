@@ -141,8 +141,10 @@ jobs:
           (cd astro && npm pack --pack-destination "$SMOKE")
           mkdir "$SMOKE/extract"
           tar xzf "$SMOKE/run402-astro-$NEW.tgz" -C "$SMOKE/extract"
-          # Required artifacts:
-          test -f "$SMOKE/extract/package/src/Image.astro" || (echo "Missing Image.astro" && exit 1)
+          # Required artifacts. Image.astro moved from src/ to dist/ in
+          # v0.1.2 (kychee-com/run402-private#396) so the build step can
+          # ship it as a peer of the JS modules it imports.
+          test -f "$SMOKE/extract/package/dist/Image.astro" || (echo "Missing dist/Image.astro" && exit 1)
           test -f "$SMOKE/extract/package/dist/index.js" || (echo "Missing dist/index.js" && exit 1)
           test -f "$SMOKE/extract/package/dist/index.d.ts" || (echo "Missing dist/index.d.ts" && exit 1)
           test -f "$SMOKE/extract/package/README.md" || (echo "Missing README" && exit 1)
