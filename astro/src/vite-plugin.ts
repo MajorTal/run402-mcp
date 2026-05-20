@@ -68,7 +68,7 @@ export interface MinimalVitePlugin {
   enforce?: "pre" | "post";
   configResolved?(config: { root?: string }): void;
   buildStart?(): void | Promise<void>;
-  transform?(code: string, id: string): null | { code: string; map: null };
+  load?(id: string): null | string | Promise<null | string>;
   closeBundle?(): void | Promise<void>;
 }
 
@@ -154,13 +154,52 @@ export function createVitePlugin(state: VitePluginState): MinimalVitePlugin {
       );
     },
 
-    transform(code, id) {
-      if (!shouldTransform(id)) return null;
+    // Source-rewrite via `load(id)` instead of `transform(code, id)`.
+    //
+    // v0.1.1 used `transform`, which fails because Astro's `.astro`
+    // compiler runs as a Vite **load** hook (`enforce` doesn't matter —
+    // first-load-wins for a given id). By the time any transform fires,
+    // the `.astro` source has already been compiled to a JS module:
+    // `<Image src="./foo.jpg">` is now `$$createComponent(Image, { src:
+    // "./foo.jpg" })`. Our regex over the JS bytes finds zero `<Image`
+    // matches, the rewrite is a no-op, and the component looks up the
+    // registry with the still-relative src — which doesn't match the
+    // absolute-path key the build-start scan wrote.
+    //
+    // The fix: claim `.astro` files in `load`. Since we declare
+    // `enforce: 'pre'` AND there's only one plugin allowed to win `load`
+    // for a given id, claiming first means we read the raw source from
+    // disk, rewrite it, return the rewritten string, and let Astro's
+    // compiler transform that rewritten source — which now embeds the
+    // absolute path the registry expects.
+    //
+    // We only claim `.astro` (not .tsx/.jsx/.mdx) because Astro's
+    // compiler is the only Vite plugin that does its work in `load`;
+    // for the JSX-family file types the transform pipeline still
+    // applies, which is too late. Users mounting React components via
+    // `@astrojs/react` that internally use `<Image>` would not be
+    // covered by v0.1.2's source-rewrite — they'd hit the same
+    // MissingAssetRefError. That's a known limitation; documented in
+    // the spec under "build-time discovery is brittle." A future v0.2
+    // pivots to the import-based pattern (`import hero from './hero.jpg'`)
+    // which sidesteps source-rewriting entirely.
+    async load(id) {
+      const cleanId = id.split("?")[0] ?? id;
+      if (!cleanId.endsWith(".astro")) return null;
 
-      const fileRefs = collectRefsForFile(state.refMap, id);
+      const fileRefs = collectRefsForFile(state.refMap, cleanId);
       if (fileRefs.length === 0) return null;
 
-      let modified = code;
+      let source: string;
+      try {
+        source = await readFile(cleanId, "utf-8");
+      } catch {
+        // File unreadable — let Astro's load handle it (and probably
+        // surface its own error).
+        return null;
+      }
+
+      let modified = source;
       let didChange = false;
       for (const { reference, absolutePath } of fileRefs) {
         const next = rewriteImageSrc(modified, reference.src, absolutePath);
@@ -169,7 +208,10 @@ export function createVitePlugin(state: VitePluginState): MinimalVitePlugin {
           didChange = true;
         }
       }
-      return didChange ? { code: modified, map: null } : null;
+      // If the rewrite was a no-op, returning null lets Astro's load run
+      // as normal — avoids double-reading the file from disk and dodges
+      // any subtle plugin-ordering surprise.
+      return didChange ? modified : null;
     },
 
     closeBundle() {
@@ -211,15 +253,6 @@ function collectRefsForFile(
     if (value.reference.importingFile === fileId) out.push(value);
   }
   return out;
-}
-
-function shouldTransform(id: string): boolean {
-  // Vite passes IDs with a `?` suffix for sub-modules; strip those first.
-  const cleanId = id.split("?")[0] ?? id;
-  const dot = cleanId.lastIndexOf(".");
-  if (dot === -1) return false;
-  const ext = cleanId.slice(dot).toLowerCase();
-  return ext === ".astro" || ext === ".tsx" || ext === ".jsx" || ext === ".mdx" || ext === ".md";
 }
 
 /**

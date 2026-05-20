@@ -36,7 +36,7 @@ In CI, the integration auto-detects GitHub OIDC credentials when the workflow ha
 
 ```astro
 ---
-import { Image } from '@run402/astro/Image.astro';
+import { Image } from '@run402/astro';
 ---
 <Image src="./images/hero.jpg" alt="Sunset over the Pacific" sizes="100vw" priority />
 
@@ -44,6 +44,16 @@ import { Image } from '@run402/astro/Image.astro';
 ```
 
 `src` is resolved relative to the importing `.astro` file. TypeScript path aliases (`@/*`) also work if you have them in `tsconfig.json`.
+
+**Alternative subpath import** also works if you prefer being explicit about the `.astro` component file:
+
+```astro
+---
+import Image from '@run402/astro/Image.astro';
+---
+```
+
+(Note: subpath form uses default-import syntax because `.astro` files only have a default export. Both forms resolve to the same component.)
 
 ## Generated HTML
 

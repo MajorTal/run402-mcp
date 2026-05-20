@@ -143,5 +143,21 @@ function configRootToPath(root: URL | string | undefined): string {
   return String(root);
 }
 
+// Named re-export of the <Image> component so consumers can either:
+//   - import { Image } from '@run402/astro'                — ergonomic, matches React/Next conventions
+//   - import Image from '@run402/astro/Image.astro'        — explicit subpath form
+//
+// Both forms resolve to the SAME `.astro` component shipped under
+// `dist/Image.astro`. The subpath form was the only thing that worked
+// in v0.1.1 (and was documented inconsistently — see kychee-com/
+// run402-private#399). v0.1.2 makes both forms work and aligns docs to
+// the named form.
+//
+// The tsc-side `*.astro` ambient declaration in `astro-modules.d.ts`
+// lets this re-export type-check; at runtime Vite/Astro resolves the
+// `./Image.astro` specifier against `dist/Image.astro` per the
+// package's exports map.
+export { default as Image } from "./Image.astro";
+
 // Type re-exports for consumers.
 export type { AssetRef, AssetVariant, ImageProps, Run402AstroOptions } from "./types.js";
