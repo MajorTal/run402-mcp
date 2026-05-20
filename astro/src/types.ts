@@ -85,6 +85,53 @@ export interface Run402AstroOptions {
    * developer's `~/.config/run402/projects.json` keystore.
    */
   credentials?: unknown;
+  /**
+   * v0.2+: build-time directory uploader for data-driven consumers (CMS,
+   * DB-backed sites, typed seed files). When set, the integration walks
+   * the given directory (or directories) at `buildStart`, uploads every
+   * image file via `r.assets.put`, and emits a manifest JSON that
+   * runtime renderers can query by key.
+   *
+   * Pass a single absolute or project-root-relative path, or an array
+   * for multiple sources:
+   *
+   *     assetsDir: 'demo/eagles/assets'
+   *     assetsDir: ['demo/eagles/assets', 'src/cms-images']
+   *
+   * Files are walked recursively. The manifest key for each file is its
+   * path relative to the assetsDir (e.g., 'demo/eagles/assets/hero.jpg'
+   * → key 'hero.jpg'; nested 'avatars/01.jpg' → key 'avatars/01.jpg').
+   *
+   * Closes kychee-com/run402-private#406. The static-template `<Image>`
+   * scan continues to run alongside this; both feed the same upload
+   * batch + the same registry. CAS dedup at the gateway means an image
+   * referenced via BOTH paths uploads once.
+   */
+  assetsDir?: string | string[];
+  /**
+   * Where to emit the asset manifest JSON. Default:
+   * `'dist/_assets-manifest.json'`. The path is resolved relative to
+   * the project root.
+   *
+   * The manifest is written at `closeBundle` time, after Astro has
+   * finished writing its own `dist/` output. Format: see
+   * `@run402/astro/manifest` for the typed reader + the file shape.
+   *
+   * Only emitted when `assetsDir` is set. Static-`<Image>`-only
+   * consumers don't need the manifest because their references are
+   * resolved at build time via the source-rewrite + virtual-module
+   * registry path.
+   */
+  manifestPath?: string;
+  /**
+   * File extensions accepted when walking `assetsDir`. Default:
+   * `['.jpg', '.jpeg', '.png', '.webp', '.avif', '.heic', '.heif']`
+   * (the same set v1.49's encoder supports). Non-image extensions in
+   * the directory are silently skipped.
+   *
+   * Case-insensitive; specify with the leading dot.
+   */
+  assetExtensions?: string[];
 }
 
 /** Props accepted by the `<Image>` component. */

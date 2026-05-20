@@ -23,6 +23,7 @@
  * lifecycle and validates configuration up front.
  */
 
+import path from "node:path";
 import { BuildCache } from "./cache.js";
 import { MissingProjectIdError } from "./errors.js";
 import { loadAliasConfig } from "./resolver.js";
@@ -48,6 +49,33 @@ type AstroIntegration = {
 };
 
 const DEFAULT_PREFIX = "astro/";
+const DEFAULT_MANIFEST_PATH = "dist/_assets-manifest.json";
+const DEFAULT_ASSET_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".avif",
+  ".heic",
+  ".heif",
+];
+
+function resolveAssetsDirs(
+  projectRoot: string,
+  spec: string | string[] | undefined,
+): { absolutePath: string; baseDir: string }[] {
+  if (!spec) return [];
+  const list = Array.isArray(spec) ? spec : [spec];
+  return list.map((rel) => {
+    const abs = path.isAbsolute(rel) ? rel : path.resolve(projectRoot, rel);
+    return { absolutePath: abs, baseDir: abs };
+  });
+}
+
+function resolveManifestPath(projectRoot: string, spec: string | undefined): string {
+  const rel = spec ?? DEFAULT_MANIFEST_PATH;
+  return path.isAbsolute(rel) ? rel : path.resolve(projectRoot, rel);
+}
 
 export function run402(options: Run402AstroOptions = {}): AstroIntegration {
   const projectId = options.projectId ?? process.env.RUN402_PROJECT_ID;
@@ -76,6 +104,13 @@ export function run402(options: Run402AstroOptions = {}): AstroIntegration {
           refMap: new Map(),
           publicDirRefs: new Set(),
           virtualEntries: new Map(),
+          // v0.2 data-driven path. Resolve assetsDir(s) to absolute paths
+          // against the project root so the walker doesn't depend on cwd.
+          assetsDirs: resolveAssetsDirs(projectRoot, options.assetsDir),
+          manifestPath: resolveManifestPath(projectRoot, options.manifestPath),
+          assetExtensions: options.assetExtensions ?? DEFAULT_ASSET_EXTENSIONS,
+          manifestKeyByAbsPath: new Map(),
+          projectId: projectId ?? "(unset)",
         };
 
         // Lazily initialize the SDK client at the moment we know we need it.

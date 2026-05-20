@@ -55,6 +55,16 @@ img {
 
 This is the same CLS-prevention contract as Next.js's `<Image>`. v0.1.x doesn't check this at build time; it's docs-only because consumer CSS can be arbitrarily complex.
 
+## Two consumer shapes
+
+`@run402/astro` covers both shapes of Astro site:
+
+**Static-template sites** (hero on the home page, logos in nav, hand-authored landing pages). Image references are string literals in `.astro` templates. Use `<Image src="./images/hero.jpg" alt="...">`. The integration scans your templates at build time, uploads each unique source, and rewrites the markup to consume v1.49 variants. See the **Use** section below.
+
+**Data-driven sites** (CMS-backed content, DB-backed seeds, MDX collections with frontmatter images, admin-editable pages). Image URLs live in runtime values — JSONB rows, content collection entries, fetch responses. There are no `<Image>` candidates for a build-time scan. Use the **`assetsDir` + manifest** pattern: walk a directory of source images at build time, upload them all, emit a JSON manifest, and look up variants at render time. See the **Data-driven consumers** section below.
+
+A real Astro site usually has both. Set both options; they share the same upload pipeline, the same cache, the same CDN.
+
 ## Why
 
 Run402 v1.49 pre-encodes 3 WebP variants (320w / 800w / 1920w) + a display-friendly JPEG for HEIC sources + a blurhash placeholder for every image uploaded via the assets slice. Variants serve from CloudFront like any other static URL. This package wires that pipeline into Astro's build: walk your `<Image>` references, upload each unique source, render `<picture>` markup that consumes the variants.
@@ -113,6 +123,74 @@ import Image from '@run402/astro/Image.astro';
 `src` is resolved relative to the importing `.astro` file. TypeScript path aliases (`@/*`) also work if you have them in `tsconfig.json`.
 
 **Note on the import shape.** `.astro` components have a single default export, so `import Image from '@run402/astro/Image.astro'` (default-import, subpath) is the only correct form. There is no `import { Image } from '@run402/astro'` named export — anything imported from `@run402/astro` must evaluate cleanly under vanilla Node so it can be loaded from `astro.config.mjs` before Vite is alive, and a top-level re-export of an `.astro` module breaks that boundary.
+
+## Data-driven consumers (v0.2+)
+
+For sites where image URLs live in runtime values (CMS, DB-backed content, JSON seeds), set `assetsDir` in `astro.config.mjs`:
+
+```js
+export default defineConfig({
+  integrations: [
+    run402({
+      assetsDir: 'src/cms-images',           // or ['demo/eagles/assets', 'demo/silver-pines/assets']
+      manifestPath: 'dist/_assets-manifest.json',  // optional; this is the default
+    }),
+  ],
+});
+```
+
+`buildStart` walks the directory recursively, uploads every image file (extensions: `.jpg/.jpeg/.png/.webp/.avif/.heic/.heif`), and `closeBundle` writes a manifest JSON.
+
+**Manifest shape:**
+
+```json
+{
+  "version": 1,
+  "project_id": "prj_...",
+  "asset_prefix": "astro/",
+  "generated_at": "2026-05-20T13:30:00.000Z",
+  "assets": {
+    "hero.jpg": {
+      "key": "astro/hero.jpg",
+      "sha256": "abc123...",
+      "width_px": 1920,
+      "height_px": 1080,
+      "blurhash": "L6PZfSi_...",
+      "cdn_url": "https://cdn.run402.com/.../hero.jpg",
+      "display_url": "https://cdn.run402.com/.../hero.jpg",
+      "variants": {
+        "thumb":  { "cdn_url": "...", "width_px": 320, "height_px": 180, "format": "webp", ... },
+        "medium": { ... },
+        "large":  { ... }
+      }
+    }
+  }
+}
+```
+
+Keys are paths relative to the `assetsDir` (preserving nesting: `avatars/01.jpg` → `"avatars/01.jpg"`).
+
+**Render-time consumption:**
+
+```ts
+import { resolveVariants, renderPicture } from '@run402/astro/manifest';
+import manifest from '../../dist/_assets-manifest.json';
+
+function renderHeroImage(imageUrl: string, alt: string): string {
+  // imageUrl came from a database row: '/assets/hero.jpg'
+  const key = imageUrl.replace(/^\/assets\//, '');
+  const ref = resolveVariants(manifest, key);
+  if (!ref) {
+    // Fallback: not in manifest (admin-uploaded post-deploy, etc.)
+    return `<img src="${imageUrl}" alt="${alt}">`;
+  }
+  return renderPicture(ref, { alt, sizes: '100vw', priority: true });
+}
+```
+
+`renderPicture` produces the same `<picture>` HTML the static `<Image>` component does, with the same CLS-prevention contract (#4 in **Before you start**). No Vite or Astro runtime dependency — safe to import from any SSR / SSG / API-route module.
+
+**Combining both paths.** Set BOTH `assetsDir` and use `<Image>` for static-template images. The integration deduplicates by absolute path + CAS dedup at the gateway, so an image referenced via both paths uploads once.
 
 ## Generated HTML
 

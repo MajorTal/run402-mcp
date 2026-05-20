@@ -19,9 +19,9 @@
  * runs at default priority.
  */
 
-import { existsSync, unlinkSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join, relative, resolve as pathResolve, sep } from "node:path";
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
+import { dirname, extname, join, relative, resolve as pathResolve, sep } from "node:path";
 import { BuildCache } from "./cache.js";
 import type { AliasConfig } from "./resolver.js";
 import { loadAliasConfig, resolveImageSrc } from "./resolver.js";
@@ -64,6 +64,33 @@ export interface VitePluginState {
    * registry.ts alone is insufficient.
    */
   virtualEntries: Map<string, import("./types.js").AssetRef>;
+  /**
+   * v0.2+: directories to walk for the data-driven manifest path. Each
+   * file is mapped to a manifest key (path relative to the directory)
+   * and an absolute path. The same absolute path may be discovered via
+   * `<Image>` scan too; CAS dedup handles it. Empty when `assetsDir`
+   * is unset. See kychee-com/run402-private#406 for the use case.
+   */
+  assetsDirs: { absolutePath: string; baseDir: string }[];
+  /**
+   * Absolute path where the manifest JSON gets written at `closeBundle`.
+   * Only meaningful when `assetsDirs` is non-empty.
+   */
+  manifestPath: string;
+  /**
+   * Lower-case extensions accepted when walking `assetsDirs`. Defaults
+   * to v1.49's supported set; configurable via Run402AstroOptions.
+   */
+  assetExtensions: string[];
+  /**
+   * Map from absolute file path → manifest key (path relative to the
+   * file's containing `assetsDir`). Populated in `buildStart` after the
+   * assetsDir walk; consumed at `closeBundle` time to write the JSON
+   * manifest. Empty when no `assetsDir` is configured.
+   */
+  manifestKeyByAbsPath: Map<string, string>;
+  /** Project ID — needed for the manifest's `project_id` field. */
+  projectId: string;
 }
 
 /**
@@ -152,6 +179,21 @@ export function createVitePlugin(state: VitePluginState): MinimalVitePlugin {
       }
 
       const uniquePaths = new Set(Array.from(refMap.values()).map((v) => v.absolutePath));
+
+      // v0.2: data-driven path — walk every configured assetsDir and
+      // add discovered image files to the upload set. Track which key
+      // (relative-to-baseDir) each absolutePath maps to so the manifest
+      // can be emitted at closeBundle. CAS dedup at the gateway means
+      // an image referenced via BOTH the <Image> scan AND assetsDir
+      // uploads once.
+      for (const dirSpec of state.assetsDirs) {
+        const filesInDir = await walkAssetsDir(dirSpec.absolutePath, state.assetExtensions);
+        for (const absFile of filesInDir) {
+          uniquePaths.add(absFile);
+          const key = relative(dirSpec.baseDir, absFile).split(sep).join("/");
+          state.manifestKeyByAbsPath.set(absFile, key);
+        }
+      }
 
       if (state.dryRun) {
         await emitDryRunReport(uniquePaths);
@@ -267,28 +309,72 @@ export function createVitePlugin(state: VitePluginState): MinimalVitePlugin {
     },
 
     closeBundle() {
-      if (state.publicDirRefs.size === 0) return;
-
-      const distDir = pathResolve(state.projectRoot, "dist");
-      const publicDir = pathResolve(state.projectRoot, "public");
-      if (!existsSync(distDir)) return;
-
-      for (const absPath of state.publicDirRefs) {
-        const rel = relative(publicDir, absPath);
-        const distCopy = join(distDir, rel);
-        if (existsSync(distCopy)) {
-          try {
-            unlinkSync(distCopy);
-            process.stderr.write(`[run402-astro] excluded from dist: ${rel}\n`);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            process.stderr.write(
-              `[run402-astro] WARN could not exclude ${rel} from dist: ${msg}\n`,
-            );
+      // (a) public/ auto-copy exclusion for <Image>-referenced sources.
+      if (state.publicDirRefs.size > 0) {
+        const distDir = pathResolve(state.projectRoot, "dist");
+        const publicDir = pathResolve(state.projectRoot, "public");
+        if (existsSync(distDir)) {
+          for (const absPath of state.publicDirRefs) {
+            const rel = relative(publicDir, absPath);
+            const distCopy = join(distDir, rel);
+            if (existsSync(distCopy)) {
+              try {
+                unlinkSync(distCopy);
+                process.stderr.write(`[run402-astro] excluded from dist: ${rel}\n`);
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                process.stderr.write(
+                  `[run402-astro] WARN could not exclude ${rel} from dist: ${msg}\n`,
+                );
+              }
+            }
           }
         }
       }
+
+      // (b) v0.2 — emit the asset manifest JSON. The manifest lets
+      // data-driven consumers (CMS, DB-backed sites, typed seed files)
+      // resolve runtime image URLs to v1.49 variants at render time.
+      // See kychee-com/run402-private#406 + manifest.ts.
+      if (state.manifestKeyByAbsPath.size > 0) {
+        try {
+          const manifest = buildManifest(state);
+          mkdirSync(dirname(state.manifestPath), { recursive: true });
+          writeFileSync(state.manifestPath, JSON.stringify(manifest, null, 2), "utf-8");
+          process.stderr.write(
+            `[run402-astro] wrote manifest with ${
+              Object.keys(manifest.assets).length
+            } entries → ${state.manifestPath}\n`,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`[run402-astro] WARN manifest emit failed: ${msg}\n`);
+        }
+      }
     },
+  };
+}
+
+/**
+ * Build the AssetManifest JSON from the populated build state. Keys are
+ * paths relative to each `assetsDir`; values are the full AssetRef
+ * objects the uploader returned (which the virtual-module registry has
+ * already cached). If an absolute path was discovered via assetsDir but
+ * its upload failed silently, the entry is skipped — only AssetRefs
+ * that actually resolved make it into the manifest.
+ */
+function buildManifest(state: VitePluginState): import("./manifest.js").AssetManifest {
+  const assets: { [key: string]: import("./types.js").AssetRef } = {};
+  for (const [absPath, key] of state.manifestKeyByAbsPath) {
+    const ref = state.virtualEntries.get(absPath);
+    if (ref) assets[key] = ref;
+  }
+  return {
+    version: 1,
+    project_id: state.projectId,
+    asset_prefix: state.prefix,
+    generated_at: new Date().toISOString(),
+    assets,
   };
 }
 
@@ -428,6 +514,45 @@ async function emitDryRunReport(uniquePaths: Set<string>): Promise<void> {
       `(${uniquePaths.size} files × ${ENCODER_SECONDS_PER_VARIANT}s / ${ENCODER_CONCURRENT} concurrent)\n`,
   );
   process.stderr.write(`========================================\n\n`);
+}
+
+/**
+ * Recursively walk `dir` and return absolute paths of files whose
+ * extension matches `allowedExtensions` (case-insensitive). Used by
+ * the v0.2 `assetsDir` data-driven path. Symlinks are not followed.
+ *
+ * No glob library — Node's stdlib `readdir({ withFileTypes: true })`
+ * gives us what we need and avoids the dependency footprint.
+ */
+async function walkAssetsDir(
+  dir: string,
+  allowedExtensions: string[],
+): Promise<string[]> {
+  const acceptedExts = new Set(allowedExtensions.map((e) => e.toLowerCase()));
+  const out: string[] = [];
+  const stack: string[] = [dir];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    let entries;
+    try {
+      entries = await readdir(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) {
+        // Skip dot-directories (e.g., .DS_Store-related) and node_modules.
+        if (entry.name.startsWith(".")) continue;
+        if (entry.name === "node_modules") continue;
+        stack.push(full);
+      } else if (entry.isFile()) {
+        const ext = extname(entry.name).toLowerCase();
+        if (acceptedExts.has(ext)) out.push(full);
+      }
+    }
+  }
+  return out;
 }
 
 function emitUploadEvent(event: UploadLogEvent, verbose: boolean): void {

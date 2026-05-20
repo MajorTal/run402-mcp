@@ -10,7 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./Image.astro": "./dist/Image.astro"
+    "./Image.astro": "./dist/Image.astro",
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "import": "./dist/manifest.js"
+    }
   },
   "files": [
     "dist",
@@ -19,7 +23,7 @@
   ],
   "scripts": {
     "build": "tsc && cp src/Image.astro dist/Image.astro",
-    "test": "node --experimental-test-module-mocks --test --import tsx src/resolver.test.ts src/cache.test.ts src/scanner.test.ts src/uploader.test.ts src/component.test.ts"
+    "test": "node --experimental-test-module-mocks --test --import tsx src/resolver.test.ts src/cache.test.ts src/scanner.test.ts src/uploader.test.ts src/component.test.ts src/manifest.test.ts"
   },
   "engines": {
     "node": ">=18"
