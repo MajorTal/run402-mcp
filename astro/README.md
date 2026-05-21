@@ -247,6 +247,53 @@ function renderHeroImage(imageUrl: string, alt: string): string {
 
 **Combining both paths.** Set BOTH `assetsDir` and use `<Image>` for static-template images. The integration deduplicates by absolute path + CAS dedup at the gateway, so an image referenced via both paths uploads once.
 
+### Reading the manifest during `astro build` (v0.2.3+)
+
+The manifest JSON is written at `closeBundle` time — *after* Astro renders pages. If your bake step needs the manifest during page render (e.g. you're emitting `<picture>` HTML directly into `dist/index.html` from a typed seed), you can't read the file from disk in `.astro` frontmatter because it doesn't exist yet. Use `getBuildTimeManifest()` from `@run402/astro/build-manifest` instead — it returns the same shape, sourced from the integration's virtual module:
+
+```astro
+---
+// src/pages/index.astro
+import Portal from '../layouts/Portal.astro';
+import { getBuildTimeManifest } from '@run402/astro/build-manifest';
+import { resolveVariants, renderPicture } from '@run402/astro/manifest';
+import { mySectionsFromSeed } from '../lib/my-bake';
+
+const manifest = getBuildTimeManifest();
+const sectionsHtml = mySectionsFromSeed(manifest)
+  .map(s => renderSection(s, manifest))
+  .join('');
+
+function renderSection(s, manifest) {
+  const ref = manifest ? resolveVariants(manifest, s.image_key) : null;
+  const img = ref
+    ? renderPicture(ref, { alt: s.alt, sizes: '100vw', priority: s.priority })
+    : `<img src="${s.image_url}" alt="${s.alt}">`;
+  return `<section class="${s.cls}">${img}</section>`;
+}
+---
+<Portal title="Home">
+  <div id="sections" set:html={sectionsHtml}></div>
+</Portal>
+```
+
+**Returns**:
+
+- `AssetManifest` — `assetsDir` is configured and the walk found at least one image. Pass to `resolveVariants(manifest, key)` exactly like the runtime path.
+- `null` — `assetsDir` is unset (the integration's data-driven path isn't in use). Your bake should fall back to plain `<img>`.
+
+**Options** (all optional, override the baked values):
+
+```ts
+getBuildTimeManifest({
+  projectId: 'prj_preview',                // override the baked project_id
+  assetPrefix: 'my-app/',                  // override the baked asset_prefix
+  generatedAt: '2026-01-01T00:00:00.000Z', // for deterministic builds (snapshot tests)
+})
+```
+
+> ⚠️ **Don't import `@run402/astro/build-manifest` from `astro.config.mjs`.** It transitively imports the `virtual:run402-assetmap` Vite module, which doesn't exist before Vite starts. Astro CLI loads the config file via vanilla Node — same boundary that closed [run402-private#400](https://github.com/kychee-com/run402-private/issues/400). Page templates and any modules pages import are fine.
+
 ### Bulk admin UIs
 
 If you need to list every asset uploaded to a project (admin gallery, "show me everything in this prefix" media browser), the build-time manifest is the wrong tool — it only covers what `assetsDir` walked at build time, doesn't include runtime uploads, and can't paginate or filter. Use `r.assets.ls(projectId, { prefix, limit?, cursor?, sort?, filter? })` from the SDK instead; it's the storage list endpoint with v1.50 pagination, sort, and media-picker filters.
