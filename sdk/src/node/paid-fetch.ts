@@ -7,11 +7,16 @@
  * optional payment libraries fail to load. Callers can fall back to an
  * unwrapped fetch and let 402s surface as `PaymentRequired` errors.
  *
+ * The viem / @x402/* / mppx imports live behind `./_paid-stack.ts` so the
+ * SDK's direct surface to those packages is auditable from one file and the
+ * packages can be declared as optional peer dependencies in package.json.
+ *
  * Never calls `process.exit` — the SDK leaves exit-code decisions to the
  * CLI edge.
  */
 
 import { readAllowance } from "../../core-dist/allowance.js";
+import { PaidStackUnavailable, loadMppStack, loadX402Stack } from "./_paid-stack.js";
 
 type FetchFn = typeof globalThis.fetch;
 
@@ -26,6 +31,8 @@ const USDC_ABI = [
 ] as const;
 const USDC_MAINNET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 const USDC_SEPOLIA = "0x036CbD53842c5426634e7929541eC2318f3dCF7e";
+
+let warnedMissingDeps = false;
 
 async function checkBalance(
   publicClient: { readContract: (args: unknown) => Promise<bigint> },
@@ -61,49 +68,29 @@ export async function setupPaidFetch(): Promise<FetchFn | null> {
 
   try {
     if (allowance.rail === "mpp") {
-      const mppxMod = "mppx/client";
-      const { Mppx, tempo } = (await import(/* webpackIgnore: true */ mppxMod)) as {
-        Mppx: { create: (opts: unknown) => { fetch: FetchFn } };
-        tempo: (opts: unknown) => unknown;
-      };
-      const { privateKeyToAccount } = await import("viem/accounts");
-      const account = privateKeyToAccount(allowance.privateKey as `0x${string}`);
-      const mppx = Mppx.create({
+      const stack = await loadMppStack();
+      const account = stack.privateKeyToAccount(allowance.privateKey as `0x${string}`);
+      const mppx = stack.Mppx.create({
         polyfill: false,
-        methods: [tempo({ account })],
+        methods: [stack.tempo({ account })],
       });
       return mppx.fetch;
     }
 
     // Default: x402 on Base + Base Sepolia
-    const { privateKeyToAccount } = await import("viem/accounts");
-    const { createPublicClient, http } = await import("viem");
-    const { base, baseSepolia } = await import("viem/chains");
-    const { x402Client, wrapFetchWithPayment } = await import("@x402/fetch");
-    const { ExactEvmScheme } = await import("@x402/evm/exact/client");
-    const { toClientEvmSigner } = await import("@x402/evm");
-
-    const account = privateKeyToAccount(allowance.privateKey as `0x${string}`);
-    const mainnetClient = createPublicClient({ chain: base, transport: http() });
-    const sepoliaClient = createPublicClient({ chain: baseSepolia, transport: http() });
+    const stack = await loadX402Stack();
+    const account = stack.privateKeyToAccount(allowance.privateKey as `0x${string}`);
+    const mainnetClient = stack.createPublicClient({ chain: stack.base, transport: stack.http() });
+    const sepoliaClient = stack.createPublicClient({ chain: stack.baseSepolia, transport: stack.http() });
 
     const [mainnetBalance, sepoliaBalance] = await Promise.all([
-      checkBalance(mainnetClient as never, USDC_MAINNET, allowance.address),
-      checkBalance(sepoliaClient as never, USDC_SEPOLIA, allowance.address),
+      checkBalance(mainnetClient, USDC_MAINNET, allowance.address),
+      checkBalance(sepoliaClient, USDC_SEPOLIA, allowance.address),
     ]);
 
-    const client = new x402Client() as unknown as {
-      register: (network: string, scheme: unknown) => void;
-      registerPolicy: (fn: (version: number, reqs: unknown[]) => unknown[]) => void;
-    };
-    client.register(
-      "eip155:8453",
-      new ExactEvmScheme(toClientEvmSigner(account, mainnetClient as never)),
-    );
-    client.register(
-      "eip155:84532",
-      new ExactEvmScheme(toClientEvmSigner(account, sepoliaClient as never)),
-    );
+    const client = new stack.x402Client();
+    client.register("eip155:8453", new stack.ExactEvmScheme(stack.toClientEvmSigner(account, mainnetClient)));
+    client.register("eip155:84532", new stack.ExactEvmScheme(stack.toClientEvmSigner(account, sepoliaClient)));
 
     if (mainnetBalance > 0 || sepoliaBalance > 0) {
       // Compare against the requested amount, not > 0. A chain with dust below
@@ -124,8 +111,16 @@ export async function setupPaidFetch(): Promise<FetchFn | null> {
     // Read `globalThis.fetch` fresh each call so test suites that swap the
     // global fetch after setupPaidFetch has already run still see their mocks.
     const dynamicFetch: FetchFn = (input, init) => globalThis.fetch(input, init);
-    return wrapFetchWithPayment(dynamicFetch, client as never) as FetchFn;
-  } catch {
+    return stack.wrapFetchWithPayment(dynamicFetch, client);
+  } catch (err) {
+    // Emit a clear one-time warning when the failure is "optional peer deps
+    // not installed" — otherwise the caller silently falls back to unwrapped
+    // fetch and the user has no way to know they need to `npm install viem`.
+    // Other errors stay silent to preserve the graceful-degradation contract.
+    if (err instanceof PaidStackUnavailable && !warnedMissingDeps) {
+      warnedMissingDeps = true;
+      console.warn(`[run402] ${err.message}`);
+    }
     return null;
   }
 }

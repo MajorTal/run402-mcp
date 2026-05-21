@@ -2,10 +2,10 @@
  * Decode a blurhash string to a 32x32 base64 PNG data URI for use as
  * `background-image: url(data:image/png;base64,...)` on the `<img>` element.
  *
- * The `blurhash` npm package decodes to a Uint8ClampedArray of RGBA pixels.
- * We then encode that as a PNG using a minimal pure-JS encoder (no native
- * dependencies — Astro projects run in many shapes of CI environments and
- * we want this to Just Work without sharp/canvas).
+ * The blurhash decoder is inlined (see `decode` below) so this package has
+ * zero runtime dependencies. The algorithm is a direct port of the Wolt
+ * reference implementation (MIT, https://github.com/woltapp/blurhash) and
+ * is byte-equivalent — see `blurhash-decoder.test.ts`.
  *
  * Trade-offs:
  *   - 32x32 is the largest sensible blurhash decode; the perceptual fidelity
@@ -18,8 +18,6 @@
  *     component (the average color) and return a `background-color: #XXXXXX`
  *     declaration instead — even smaller HTML, no data URI.
  */
-
-import { decode } from "blurhash";
 
 const PLACEHOLDER_SIZE = 32;
 
@@ -137,4 +135,120 @@ function adler32(buf: Buffer): number {
     b = (b + a) % 65521;
   }
   return ((b << 16) | a) >>> 0;
+}
+
+/**
+ * Inlined Wolt BlurHash decoder (MIT). Byte-equivalent to `blurhash@2.0.5`'s
+ * `decode()`. Replaces the npm dependency so this package has zero runtime
+ * deps — see the top-of-file docstring for the rationale.
+ *
+ * Source of truth: https://github.com/woltapp/blurhash/blob/master/TypeScript/src/decode.ts
+ * Equivalence is asserted in `blurhash-decoder.test.ts`.
+ */
+
+const BASE83_ALPHABET =
+  "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz#$%*+,-.:;=?@[]^_{|}~";
+
+function base83Decode(str: string): number {
+  let value = 0;
+  for (let i = 0; i < str.length; i++) {
+    const digit = BASE83_ALPHABET.indexOf(str[i]!);
+    if (digit === -1) throw new Error(`blurhash: invalid base83 character "${str[i]}"`);
+    value = value * 83 + digit;
+  }
+  return value;
+}
+
+function sRGBToLinear(value: number): number {
+  const v = value / 255;
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+function linearTosRGB(value: number): number {
+  const v = Math.max(0, Math.min(1, value));
+  if (v <= 0.0031308) return Math.trunc(v * 12.92 * 255 + 0.5);
+  return Math.trunc((1.055 * Math.pow(v, 1 / 2.4) - 0.055) * 255 + 0.5);
+}
+
+function signPow(value: number, exp: number): number {
+  return (value < 0 ? -1 : 1) * Math.pow(Math.abs(value), exp);
+}
+
+function decodeDC(value: number): [number, number, number] {
+  const r = value >> 16;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return [sRGBToLinear(r), sRGBToLinear(g), sRGBToLinear(b)];
+}
+
+function decodeAC(value: number, maximumValue: number): [number, number, number] {
+  const r = Math.floor(value / (19 * 19));
+  const g = Math.floor(value / 19) % 19;
+  const b = value % 19;
+  return [
+    signPow((r - 9) / 9, 2) * maximumValue,
+    signPow((g - 9) / 9, 2) * maximumValue,
+    signPow((b - 9) / 9, 2) * maximumValue,
+  ];
+}
+
+function validateBlurhash(blurhash: string): void {
+  if (!blurhash || blurhash.length < 6) {
+    throw new Error("The blurhash string must be at least 6 characters");
+  }
+  const sizeFlag = base83Decode(blurhash[0]!);
+  const numY = Math.floor(sizeFlag / 9) + 1;
+  const numX = (sizeFlag % 9) + 1;
+  if (blurhash.length !== 4 + 2 * numX * numY) {
+    throw new Error(
+      `blurhash length mismatch: length is ${blurhash.length} but it should be ${4 + 2 * numX * numY}`,
+    );
+  }
+}
+
+/** Inverse 2-D discrete cosine transform over the decoded blurhash components.
+ *  Exported for byte-equivalence tests; not part of any public-package export. */
+export function decode(blurhash: string, width: number, height: number, punch = 1): Uint8ClampedArray {
+  validateBlurhash(blurhash);
+  const sizeFlag = base83Decode(blurhash[0]!);
+  const numY = Math.floor(sizeFlag / 9) + 1;
+  const numX = (sizeFlag % 9) + 1;
+  const quantisedMaximumValue = base83Decode(blurhash[1]!);
+  const maximumValue = (quantisedMaximumValue + 1) / 166;
+
+  const colors: Array<[number, number, number]> = new Array(numX * numY);
+  for (let i = 0; i < colors.length; i++) {
+    if (i === 0) {
+      const value = base83Decode(blurhash.substring(2, 6));
+      colors[i] = decodeDC(value);
+    } else {
+      const value = base83Decode(blurhash.substring(4 + i * 2, 6 + i * 2));
+      colors[i] = decodeAC(value, maximumValue * punch);
+    }
+  }
+
+  const bytesPerRow = width * 4;
+  const pixels = new Uint8ClampedArray(bytesPerRow * height);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let j = 0; j < numY; j++) {
+        for (let i = 0; i < numX; i++) {
+          const basis = Math.cos((Math.PI * x * i) / width) * Math.cos((Math.PI * y * j) / height);
+          const color = colors[i + j * numX]!;
+          r += color[0] * basis;
+          g += color[1] * basis;
+          b += color[2] * basis;
+        }
+      }
+      const off = 4 * x + y * bytesPerRow;
+      pixels[off + 0] = linearTosRGB(r);
+      pixels[off + 1] = linearTosRGB(g);
+      pixels[off + 2] = linearTosRGB(b);
+      pixels[off + 3] = 255;
+    }
+  }
+  return pixels;
 }
