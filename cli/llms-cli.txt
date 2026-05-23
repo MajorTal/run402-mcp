@@ -1234,6 +1234,75 @@ Public service-level status. No allowance, no auth, no keystore required — wor
 - `run402 service status` — public availability report (24h/7d/30d uptime per capability, operator, deployment, schema `run402-status-v1`)
 - `run402 service health` — liveness check with per-dependency results (postgres, postgrest, s3, cloudfront) and service version
 
+### cache
+SSR origin-cache inspection + invalidation. Capability `ssr-isr-cache` (gateway v1.52+, paired with `@run402/astro` v1.0+). Cache is scoped per-project; cross-project hosts return `R402_CACHE_INVALIDATION_HOST_FORBIDDEN`.
+
+- `run402 cache inspect <url> [--locale <code>] [--release-id <id>] [--json]` — read the cache row state for a URL. Returns `{ status: "HIT" | "MISS", host, path, locale, releaseId, cachedAt, expiresAt, writtenUnderGeneration, contentSha256, headers }`. `status` is NEVER `BYPASS` — inspect does not issue a request, so it cannot evaluate runtime bypass conditions. Defaults to active release + default locale; pass `--locale` / `--release-id` to inspect non-default rows.
+- `run402 cache invalidate <url> [--json]` — invalidate a single absolute URL.
+- `run402 cache invalidate --prefix <p> --host <h> [--json]` — invalidate all rows under a path prefix on a specific host.
+- `run402 cache invalidate --all --host <h> [--json]` — entire-host purge (catastrophic content changes; nav restructure; layout-wide updates).
+
+Every invalidate returns `{ deleted, generation, host, path? }`. `generation` is the post-increment per-(project, host) counter — it gates in-flight MISS renders from overwriting after invalidation completed.
+
+### doctor
+Health + config diagnostics. Agent-DX entrypoint — agents run this first to verify environment before attempting anything else.
+
+- `run402 doctor [--json] [--verbose]` — checks: config dir presence, allowance + rail, keystore wallet count, API base reachability, active tier + lifecycle state. Exit 0 on all-pass, 1 on any failure. `--json` emits `{ ok: boolean, checks: [{ name, status, value?, hint?, message? }] }`.
+
+### dev
+Astro dev wrapper. Loads `.env.local`, verifies `RUN402_PROJECT_ID` + `RUN402_SERVICE_KEY`, then spawns `astro dev` with the env inherited.
+
+- `run402 dev [--port <n>] [--host <h>] [--project <id>]`
+
+SDK calls (`db`, `getUser`, `cache.invalidate`, `assets.put`) hit the LIVE Run402 project at `https://api.run402.com` — no local DB/S3/KMS setup required. This is shape-parity with production. Offline emulator mode is deferred to v1.5.
+
+### init astro
+Project scaffolder. Subroute of `init` (alongside `init` rail setup).
+
+- `run402 init astro [<dir>] [--force] [--json]` — creates a deployable Astro project with `package.json` (dev/deploy scripts), `astro.config.mjs` (one-line `@run402/astro` preset), `src/pages/{index,[slug]}.astro` (the latter demonstrates the full DB-backed dynamic page pattern with cache directive), `src/layouts/Layout.astro` (title + og + canonical), `src/pages/api/save-page.ts` (admin save endpoint with `db().upsert() → cache.invalidate()`), `.env.example`, `.gitignore`. Refuses non-empty dirs without `--force`.
+
+### logs
+Fetch function logs by request id. Top-level shortcut — for fine-grained per-function control, `run402 functions logs <project> <name>` still works.
+
+- `run402 logs --request-id <req_...> [--function <name>] [--project <id>] [--tail <n>] [--json]`
+
+When an SSR response returns a 5xx, the response headers include `x-run402-error-code: R402_SSR_RUNTIME_ERROR` and `x-run402-request-id: req_...`. Copy the request id and run `run402 logs --request-id req_...` to fetch the full stack trace. Scans every function in the project in parallel and aggregates entries timestamp-ascending unless `--function` narrows the scope.
+
+---
+
+## R402_* SSR Runtime Error Codes (cache + Astro adapter, gateway v1.52+)
+
+Stable error codes for the Astro SSR runtime. Each carries `code`, `message`, `suggestedFix`, `docs`, and (when statically determinable) `file`, `line`. Codes are protocol-stable and emitted as the exact uppercase string in JSON envelopes, response headers, logs, and CLI output.
+
+**Build / deploy:**
+
+- `R402_ASTRO_BUILD_FAILED` — Astro's own compiler threw an unrecovered error. Suggested fix: read the build log + address the underlying compiler error.
+- `R402_ASTRO_UNSUPPORTED_OUTPUT` — `output: '...'` is not supported. Use `output: 'server'` (default) and opt-in per route via `export const prerender = true;`.
+- `R402_ASTRO_MIDDLEWARE_UNSUPPORTED` — middleware ran but a specific pattern hit a snag. Move auth-gating to page frontmatter or API endpoints.
+- `R402_ASTRO_SERVER_ISLAND_UNSUPPORTED` — `server:defer` / `server:only` detected. Use client islands (`client:load`, `client:idle`, `client:visible`) instead; server islands deferred to v1.5.
+- `R402_ASTRO_SESSIONS_UNSUPPORTED` — `Astro.session.*` or `experimental.session` detected. Use signed cookies via `Astro.cookies` or DB-backed sessions.
+- `R402_ASTRO_DYNAMIC_IMAGE_UNSUPPORTED` — `<Image src={expr}>` where `expr` is a runtime value (DB row, function call, env var). Use `<Run402Picture asset={page.hero_asset}>` for CMS images; static-import binding `<Image src={hero}>` is allowed.
+- `R402_ASTRO_VERSION_UNSUPPORTED` — installed Astro outside the adapter's pinned peer range.
+- `R402_BUNDLE_UNRESOLVED_IMPORT` — bundler couldn't resolve a function-file import. Check package presence in `dependencies`.
+- `R402_BUNDLE_NATIVE_DEP_UNSUPPORTED` — bundle contains native binary deps (`sharp`, `better-sqlite3`, etc.). Replace with Run402 primitives (`r.assets.put` for image processing, `r.ai.*` for ML).
+
+**Runtime / SnapStart:**
+
+- `R402_SNAPSTART_INIT_IO` — module-scope IO detected during SnapStart snapshot capture. Move SDK calls inside the request handler.
+- `R402_SDK_OUTSIDE_REQUEST_CONTEXT` — SDK function called outside an active request context (module scope or post-response timer). Move into handler scope.
+- `R402_SSR_RUNTIME_ERROR` — uncaught exception during render. The public response carries `requestId` + `releaseId` (no stack trace); full stack via `run402 logs --request-id <req>`.
+
+**Cache layer:**
+
+- `R402_CACHE_UNSUPPORTED_VARY` — response `Vary` references something other than `Accept-Language`. Bypass header emitted; response delivered normally but not cached.
+- `R402_CACHE_AUTH_TAINTED` — informational diagnostic (not an `ok: false` error). Emitted via `x-run402-cache-reason: auth` when render called `getUser()` or a payment primitive. This is the expected uncacheable-by-design behavior.
+- `R402_CACHE_INVALIDATION_HOST_REQUIRED` — `cache.invalidate('/path')` called outside a request context. Use absolute URL form OR move into a request handler.
+- `R402_CACHE_INVALIDATION_HOST_FORBIDDEN` — cross-project host. Use a host attached to your project (`run402 domains list`).
+
+**Deploy:**
+
+- `R402_DEPLOY_STAGE_FAILED` — apply-v1 state machine failure at a specific stage (`validate` / `stage` / `migrate` / `schema_settling` / `activating` / `snapstart_validate`).
+
 ---
 
 ## REST API (for generated frontend code)

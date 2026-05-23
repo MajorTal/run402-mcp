@@ -1,6 +1,147 @@
 # @run402/astro
 
-One-line Astro integration for Run402 image variants. Drop `<Image>` into your templates and get the v1.49 WebP variant ladder, HEIC `display_jpeg`, blurhash placeholder, and CDN-served immutable URLs - zero runtime function cost.
+One-line Astro preset for Run402. SSR with sub-second admin-edit visibility, full image-variant pipeline, and full agent-DX: structured errors, debug headers, and CLI integration. Use it as your entire `astro.config.mjs`:
+
+```js
+// astro.config.mjs
+import run402 from "@run402/astro";
+export default run402();
+```
+
+That returns a complete `AstroUserConfig` with:
+
+- `output: 'server'` (per-route prerender via `export const prerender = true;`)
+- The Run402 SSR adapter — Lambda-backed with SnapStart, AsyncLocalStorage-wrapped request context, ISR cache layer with sub-second invalidation
+- The build-time image integration — `<Image>` upload pipeline + v1.49 WebP variant ladder + HEIC `display_jpeg` + blurhash + CDN-served immutable URLs
+- Build-time hard-fail detectors for unsupported Astro features (dynamic `<Image src={expr}>`, server islands, sessions API) with structured `R402_ASTRO_*` errors
+
+## v1.0 vs v0.2.x
+
+| | v0.2.x | v1.0.0-alpha.1 |
+|---|---|---|
+| Default export | named `run402` (returns `AstroIntegration`) | default `run402` (returns `AstroUserConfig`) |
+| What you get | image integration only | image integration + SSR adapter + Run402-aware defaults |
+| `astro.config.mjs` shape | `integrations: [run402()]` | `export default run402();` |
+| v0.2.x users | — | named `run402` is aliased to `run402Image` — existing `integrations: [run402()]` keeps working |
+
+If you only want the image integration without SSR, the `run402Image()` named export is still available and unchanged.
+
+## The SSR runtime (v1.0+)
+
+When the preset runs in default mode (`output: 'server'`), every `.astro` page is server-rendered by an AWS Lambda function with full Run402 backend access in scope. Inside frontmatter:
+
+```astro
+---
+import { db, getUser, cache } from "@run402/functions";
+import { Run402Picture } from "@run402/astro/components";
+
+const { slug } = Astro.params;
+const user = await getUser();   // ALS-aware; taints cache so this response is uncacheable
+const page = await db()
+  .from("pages")
+  .select("*")
+  .eq("slug", slug)
+  .maybeSingle();
+
+if (!page) return new Response("Not Found", { status: 404 });
+
+// Opt into the ISR cache layer:
+Astro.response.headers.set(
+  "Cache-Control",
+  "public, s-maxage=60, stale-while-revalidate=300",
+);
+---
+
+<Layout title={page.title}>
+  <Run402Picture asset={page.hero_asset} alt={page.title} priority />
+  <article set:html={page.html} />
+</Layout>
+```
+
+When an admin saves a page:
+
+```ts
+import { db, cache } from "@run402/functions";
+
+await db().from("pages").upsert({ slug, title, html });
+await cache.invalidate(`/${slug}`);   // sub-second freshness
+```
+
+Every SSR response includes `x-run402-request-id`, `x-run402-release-id`, `x-run402-function`, `x-run402-cache` (`HIT` / `MISS` / `BYPASS`), `x-run402-cache-reason` (on bypass), `x-run402-cache-age` (on hit), `x-run402-locale`. When the function throws an uncaught exception, the response carries `x-run402-error-code: R402_SSR_RUNTIME_ERROR` and `x-run402-request-id` that you pass to `run402 logs --request-id <req>` for the full stack.
+
+## `<Run402Picture>` — runtime CMS images
+
+For images coming from a DB row at SSR time (the common CMS pattern), use `<Run402Picture asset={page.hero_asset}>`. The `asset` prop is the `AssetRef` JSONB that `r.assets.put()` returned at upload time — store the whole object, not just the URL, then render directly.
+
+```astro
+---
+import { Run402Picture } from "@run402/astro/components";
+---
+<Run402Picture
+  asset={page.hero_asset}
+  alt={page.title}
+  sizes="(min-width: 768px) 50vw, 100vw"
+  priority
+/>
+```
+
+Behavior:
+- Emits `<picture>` with WebP srcset (`thumb` 320w / `medium` 800w / `large` 1920w) when the AssetRef has the full variant ladder
+- HEIC sources fall back to `variants.display_jpeg.cdn_url` for the `<img>`
+- Missing variants → safe single `<img>` from `display_url` / `cdn_url`, plus a runtime `console.warn`
+- URLs validated against unsafe schemes (`javascript:` etc.) at render time
+- `priority` → `fetchpriority="high"` + `loading="eager"` + `decoding="sync"`
+- `blurhash` data-attribute emitted when present (decoder ships at `@run402/astro/blurhash` for client hydration)
+- `width` / `height` attributes from `asset.width_px` / `asset.height_px` for CLS prevention
+
+For static template-literal images (e.g., `<Image src="./hero.jpg">`), use the build-time `<Image>` — same upload pipeline, build-time srcset emission, no runtime data needed.
+
+## CLI
+
+The Run402 CLI ships everything an agent needs to scaffold, develop, deploy, and debug an Astro project:
+
+```sh
+run402 doctor --json                                # verify environment
+run402 init astro my-portal                         # scaffold a deployable project
+run402 dev                                          # local dev with Run402 env injected
+run402 deploy --json --verify /,/the-guys           # build + deploy + smoke-test
+run402 cache inspect https://eagles.kychon.com/the-guys --json
+run402 cache invalidate https://eagles.kychon.com/the-guys
+run402 logs --request-id req_xyz123 --json          # debug a failed render
+```
+
+`run402 init astro` creates a working project with `package.json` (dev/deploy scripts), `astro.config.mjs` (one-line preset), sample `[slug].astro` with the full DB-fetch + cache pattern, an admin save endpoint demonstrating cache invalidation, and `.env.example`. See `run402 init astro --help`.
+
+## R402_* error codes
+
+Build / deploy / runtime / cache failures all return a structured envelope:
+
+```json
+{
+  "ok": false,
+  "code": "R402_ASTRO_DYNAMIC_IMAGE_UNSUPPORTED",
+  "message": "...",
+  "suggestedFix": "Store the AssetRef returned by assets.put() and render with <Run402Picture asset={...}>",
+  "docs": "https://run402.com/llms-cli.txt#r402_astro_dynamic_image_unsupported",
+  "file": "src/pages/[slug].astro",
+  "line": 14
+}
+```
+
+The 17 reserved codes for the SSR runtime:
+
+- **Build-time** — `R402_ASTRO_BUILD_FAILED`, `R402_ASTRO_UNSUPPORTED_OUTPUT`, `R402_ASTRO_MIDDLEWARE_UNSUPPORTED`, `R402_ASTRO_SERVER_ISLAND_UNSUPPORTED`, `R402_ASTRO_SESSIONS_UNSUPPORTED`, `R402_ASTRO_DYNAMIC_IMAGE_UNSUPPORTED`, `R402_ASTRO_VERSION_UNSUPPORTED`, `R402_BUNDLE_UNRESOLVED_IMPORT`, `R402_BUNDLE_NATIVE_DEP_UNSUPPORTED`
+- **Runtime** — `R402_SDK_OUTSIDE_REQUEST_CONTEXT`, `R402_SSR_RUNTIME_ERROR`, `R402_SNAPSTART_INIT_IO`
+- **Cache** — `R402_CACHE_UNSUPPORTED_VARY`, `R402_CACHE_AUTH_TAINTED` (informational), `R402_CACHE_INVALIDATION_HOST_REQUIRED`, `R402_CACHE_INVALIDATION_HOST_FORBIDDEN`
+- **Deploy** — `R402_DEPLOY_STAGE_FAILED`
+
+Every code has a `suggestedFix` field that an AI coding agent can act on directly.
+
+---
+
+## v0.2.x: Image integration only
+
+The rest of this README covers the v0.2.x build-time image integration. It still works under the v1.0 preset (which composes it automatically) AND remains available as the standalone `run402Image()` named export for users who want it without the SSR adapter.
 
 ## Before you start
 

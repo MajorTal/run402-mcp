@@ -1168,6 +1168,63 @@ status(): Promise<ServiceStatus>      // 24h/7d/30d uptime per capability — no
 health(): Promise<ServiceHealth>      // per-dependency liveness — no auth, no setup
 ```
 
+### `r.cache` (gateway v1.52+, paired with `@run402/astro` v1.0+)
+
+SSR origin-cache inspection + invalidation for the Astro SSR Runtime. Capability `ssr-isr-cache`.
+
+```
+invalidate(url: string | URL): Promise<CacheInvalidateResult>
+invalidatePrefix({ host, prefix }): Promise<CacheInvalidateResult>
+invalidateAll({ host }): Promise<CacheInvalidateResult>
+invalidateMany(urls: Array<string | URL>): Promise<CacheInvalidateResult>
+inspect(url: string | URL, opts?: { locale?, releaseId? }): Promise<CacheInspectResult>
+```
+
+`CacheInvalidateResult`:
+```ts
+{
+  deleted: number;
+  generation: string;      // post-increment per-(project, host) counter, as string for bigint safety
+  host: string;
+  path?: string;           // populated on single-URL form
+  results?: Array<{ host, deleted, generation }>;  // populated on invalidateMany
+}
+```
+
+`CacheInspectResult`:
+```ts
+{
+  status: "HIT" | "MISS";   // NEVER "BYPASS" — inspect doesn't issue a request
+  host?, path?, search?, method?, locale?, releaseId?,
+  cachedAt?: ISO8601 string;
+  expiresAt?: ISO8601 string;
+  writtenUnderGeneration?: string;
+  contentSha256?: string;   // hex
+  headers?: Record<string, string | string[]>;
+}
+```
+
+Project-scoped. Cross-project absolute URLs throw `R402_CACHE_INVALIDATION_HOST_FORBIDDEN`. Path-string `invalidate('/path')` form requires active request context to resolve the host from ALS; outside a context, throws `R402_CACHE_INVALIDATION_HOST_REQUIRED`.
+
+**Inside an Astro `[slug].astro` admin save flow:**
+
+```ts
+import { db, cache } from "@run402/functions";
+
+await db().from("pages").upsert({ slug, title, html });
+await cache.invalidate(`/${slug}`);   // sub-second freshness
+```
+
+**From an admin-side function in a different host:**
+
+```ts
+import { cache } from "@run402/functions";
+
+await cache.invalidate(new URL(`https://eagles.kychon.com/${slug}`));
+```
+
+Tag-based invalidation deferred to v1.5. Client-side (browser) invalidation NOT in v1 — server-side function context only.
+
 ### `r.admin`
 
 Operator/admin endpoints. Most agents won't reach for these — they're for platform operators.
