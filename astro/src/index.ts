@@ -100,7 +100,22 @@ function resolveManifestPath(projectRoot: string, spec: string | undefined): str
   return path.isAbsolute(rel) ? rel : path.resolve(projectRoot, rel);
 }
 
-export function run402(options: Run402AstroOptions = {}): AstroIntegration {
+/**
+ * `run402Image()` — the build-time image integration as an `AstroIntegration`.
+ *
+ * Returns just the image pipeline (asset discovery + upload + variant
+ * srcset). Use this when you want to compose the image integration
+ * alongside an unrelated Astro adapter (e.g., `@astrojs/vercel`).
+ *
+ * Most users should use the default-export `run402()` preset instead —
+ * it returns a complete `AstroUserConfig` that wires the image
+ * integration AND the Run402 SSR adapter together.
+ *
+ * @since v0.3.0-alpha.1 — renamed from `run402` (which now refers to
+ *   the default-export preset). The v0.2.x named export `run402` is
+ *   aliased to this function for backwards compatibility.
+ */
+export function run402Image(options: Run402AstroOptions = {}): AstroIntegration {
   const projectId = options.projectId ?? process.env.RUN402_PROJECT_ID;
   const verbose = options.verbose ?? process.env.RUN402_ASTRO_VERBOSE === "true";
   const dryRun = options.dryRun ?? false;
@@ -299,3 +314,85 @@ function configRootToPath(root: URL | string | undefined): string {
 
 // Type re-exports for consumers.
 export type { AssetRef, AssetVariant, ImageProps, Run402AstroOptions } from "./types.js";
+
+// --------------------------------------------------------------------------
+// v1.0 preset — default export `run402()` returns `AstroUserConfig`.
+//
+// One-line astro.config.mjs:
+//
+//   import run402 from "@run402/astro";
+//   export default run402();
+//
+// Composes the image integration (run402Image) + the SSR adapter
+// (createRun402Adapter). For users who only want one piece, the named
+// exports `run402Image` and `createRun402Adapter` remain available.
+//
+// The v0.2.x named export `run402` (image integration only) is aliased
+// to `run402Image` for the migration window — existing users can still
+// write `import { run402 } from '@run402/astro'; integrations: [run402()]`
+// without a breaking change, but the recommended path is the default
+// export preset.
+// --------------------------------------------------------------------------
+
+import type { AstroIntegration as RealAstroIntegration, AstroUserConfig } from "astro";
+import { createRun402Adapter } from "./ssr-adapter.js";
+
+/** v0.2.x compatibility alias — same as `run402Image`. */
+export { run402Image as run402 };
+
+export interface Run402PresetOptions extends Run402AstroOptions {
+  /** Astro output mode. Default `'server'` — every page SSR unless
+   *  explicitly `export const prerender = true;`. Pass `'static'` to
+   *  opt entirely out of SSR (image integration still runs). */
+  output?: "server" | "static";
+  /** Extra Astro integrations to compose alongside the preset's. */
+  integrations?: RealAstroIntegration[];
+  /** Override the project's site URL. Astro uses this for canonical
+   *  links and sitemap generation; default is derived at deploy time. */
+  site?: string;
+  /** Disable the image integration. Default `true`. Useful when you
+   *  want the SSR adapter without the build-time image pipeline. */
+  images?: boolean;
+  /** Disable the SSR adapter. Default `true`. Useful when you want
+   *  the image integration as a standalone (matches v0.2.x behavior). */
+  ssr?: boolean;
+}
+
+/**
+ * `run402()` — default export. Returns a complete `AstroUserConfig`
+ * suitable for `export default run402();` in `astro.config.mjs`.
+ *
+ * Default behavior: `output: 'server'`, image integration + SSR
+ * adapter both enabled. Toggle either off via `images: false` /
+ * `ssr: false`. Compose alongside other integrations via
+ * `integrations: [...]`.
+ *
+ * @see https://docs.run402.com/astro
+ * @since v0.3.0-alpha.1
+ */
+function preset(options: Run402PresetOptions = {}): AstroUserConfig {
+  // The local AstroIntegration interface in this file is a hand-rolled
+  // minimal shape (so the package can be type-checked when astro isn't
+  // a hard peer dep). The AstroUserConfig.integrations field expects
+  // the REAL astro AstroIntegration type. They're structurally
+  // compatible — the local interface is a subset. We cast at the
+  // array boundary so the type-checker sees the real type for
+  // AstroUserConfig.integrations.
+  const integrations: RealAstroIntegration[] = [];
+  if (options.images !== false) {
+    integrations.push(run402Image(options) as RealAstroIntegration);
+  }
+  if (options.ssr !== false) {
+    integrations.push(
+      createRun402Adapter({ projectId: options.projectId }) as RealAstroIntegration,
+    );
+  }
+  if (options.integrations) integrations.push(...options.integrations);
+  return {
+    output: options.output ?? "server",
+    integrations,
+    site: options.site,
+  };
+}
+
+export default preset;

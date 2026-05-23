@@ -2,7 +2,39 @@
 
 All notable changes to `@run402/astro`.
 
-## 0.3.0-alpha.1 — unreleased
+## 1.0.0-alpha.1 — unreleased
+
+The agent-DX-locked default-export preset (Finding 5 in the design-review consultation). One-line `astro.config.mjs`:
+
+```ts
+import run402 from "@run402/astro";
+export default run402();
+```
+
+returns a complete `AstroUserConfig` composing the image integration AND the SSR adapter. `output: 'server'` by default. Toggle either off via `images: false` / `ssr: false`. Compose alongside other integrations via `integrations: [...]`.
+
+### Added
+
+- **`run402` default export** — `(options?: Run402PresetOptions) => AstroUserConfig`. The agent-facing one-liner.
+- **`run402Image`** — named export of just the image integration (the v0.2.x default behavior, renamed for clarity). Returns `AstroIntegration` for use in custom Astro configs.
+- **`run402` named export aliased to `run402Image`** — v0.2.x users who wrote `import { run402 } from '@run402/astro'; integrations: [run402()]` continue to work unchanged.
+- **`Run402PresetOptions`** type — extends `Run402AstroOptions` (the v0.2.x image options) with `output`, `integrations`, `site`, `images`, `ssr` controls for the preset.
+
+### Migration from v0.2.x / v0.3.0-alpha
+
+- **No code change required** if you used `import { run402 } from '@run402/astro'` — the named export `run402` is aliased to `run402Image` and still returns an `AstroIntegration`.
+- **Recommended migration:** switch to the default export preset for one-line config:
+  ```ts
+  // Old (still works):
+  import { run402 } from "@run402/astro";
+  export default defineConfig({ integrations: [run402()] });
+
+  // New (recommended):
+  import run402 from "@run402/astro";
+  export default run402();
+  ```
+
+## 0.3.0-alpha.1 — superseded by 1.0.0-alpha.1
 
 Capability `astro-ssr-runtime` ([openspec change in run402-private](https://github.com/kychee-com/run402-private/tree/main/openspec/changes/astro-ssr-runtime)). Adds the SSR adapter primitives alongside the existing v0.2.x image integration. Additive — `integrations: [run402()]` users see zero breaking changes.
 
