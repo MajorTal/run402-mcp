@@ -45,7 +45,21 @@ function errorMessage(err) {
 }
 
 export async function run(args = []) {
+  // Capability `astro-ssr-runtime` (v1.52): scaffold an Astro project.
+  // Sub-routes when first positional is 'astro'. Handle BEFORE the
+  // outer --help check so `run402 init astro --help` shows the astro
+  // scaffolder's help, not the rail-setup help. The rest of init's
+  // payment-rail setup is intentionally orthogonal — agents typically
+  // run `run402 init astro <dir>` to scaffold AND `run402 init` once
+  // to set up allowance / tier.
+  if (args[0] === "astro") {
+    const { runInitAstro } = await import("./init-astro.mjs");
+    await runInitAstro(args.slice(1));
+    return;
+  }
+
   if (args.includes("--help") || args.includes("-h")) { console.log(HELP); process.exit(0); }
+
   const jsonMode = args.includes("--json");
   const isMpp = args[0] === "mpp";
   const requestedRail = isMpp ? "mpp" : "x402";
