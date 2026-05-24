@@ -262,7 +262,7 @@ Carry-forward semantics: omit `i18n` to carry forward from base release; pass `"
 
 Locale-tag rules (strict, no canonicalization):
 - `defaultLocale` MUST be byte-identical to one entry in `locales[]`. The gateway does NOT silently canonicalize; the SDK validates this client-side before planning.
-- Each tag MUST match `/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/`. Tags are opaque — there is no BCP-47 semantic validation.
+- Each tag MUST match `/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/` AND be in RFC 5646 canonical casing: primary subtag lowercase, script subtag Titlecase, 2-alpha region UPPERCASE, 3-digit (UN M.49) region preserved, variants/extensions lowercase. Examples: `pt-BR`, `zh-Hant`, `zh-Hant-TW`, `de-1996`. Non-canonical casing is rejected at deploy time with `code: "R402_LOCALE_NOT_CANONICAL"` (HTTP 400) carrying `fix: { input, canonical }` so agents can auto-correct and retry. The platform refuses to silently canonicalize because translations are typically keyed on the literal locale string in your DB (`section_translations.language = 'pt-BR'`) — auto-fixing would split the spec from your column values.
 - `locales[]` is non-empty, max 50 entries.
 - Negotiation returns canonical casing from `locales[]`, NOT the request's casing.
 
@@ -568,6 +568,11 @@ For agents that need to sign Ethereum transactions. Private keys never leave AWS
 - **`send_message`** — send feedback to the Run402 team.
 - **`set_agent_contact`** / **`get_agent_contact_status`** / **`verify_agent_contact_email`** — register agent contact info, read assurance status, and start the operator email reply challenge.
 - **`start_operator_passkey_enrollment`** — email a Run402 operator passkey enrollment link to the verified contact email.
+- **`get_operator_status`** — compact operator-health snapshot (contact assurance, critical items, skipped notifications, accounts, projects, active thresholds). Consumed by `run402 doctor`.
+- **`get_notification_preferences`** / **`set_notification_preferences`** — read/update operator notification preferences (cadence, channels, per-class toggles, locale, timezone). Cross-wallet effects need `email_verified`; webhook URL changes need `operator_passkey`.
+- **`list_notifications`** — per-delivery-attempt audit log. Paginated; filter by event_type / since.
+- **`test_notification`** — fire a real test through the full pipeline. Audit row marked `is_test=true`. Rate-limited per wallet at 1/min.
+- **`rotate_webhook_secret`** — new HMAC signing secret for the operator webhook (returned once). Previous remains valid 24h. Requires `operator_passkey`.
 
 ### Service status (no auth, no setup)
 
