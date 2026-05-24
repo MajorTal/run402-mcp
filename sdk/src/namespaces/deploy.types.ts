@@ -1528,6 +1528,11 @@ export interface ResolvedAssetRef {
   image_info?: Record<string, unknown> | null;
   image_exif?: Record<string, unknown> | null;
   image_exif_policy?: "keep" | "strip" | null;
+
+  // v1.54+ shape-contract fields. Populated atomically at upload time when
+  // the gateway encoder runs; absent on pre-v1.54 plan responses.
+  blurhash_data_url?: string | null;
+  asset_schema?: "v1.49" | "v1.50" | "v1.54" | null;
 }
 
 export interface AssetSyncPlanBlock {
@@ -2309,6 +2314,11 @@ export interface AssetManifestEntry {
   image_info?: Record<string, unknown> | null;
   image_exif?: Record<string, unknown> | null;
   image_exif_policy?: "keep" | "strip" | null;
+
+  // v1.54+ shape-contract fields, threaded from `ResolvedAssetRef`. Absent
+  // on pre-v1.54 plan responses.
+  blurhash_data_url?: string | null;
+  asset_schema?: "v1.49" | "v1.50" | "v1.54" | null;
 }
 
 // ─── Apply / start / low-level options ───────────────────────────────────────

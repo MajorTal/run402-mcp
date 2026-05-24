@@ -151,6 +151,12 @@ interface UploadCompleteResponse {
   image_info?: Record<string, unknown> | null;
   image_exif?: Record<string, unknown> | null;
   image_exif_policy?: "keep" | "strip" | null;
+  // v1.54+ shape-contract fields. Absent for pre-v1.54 gateways and for
+  // non-image uploads. Threaded through to AssetRef using the omit-when-
+  // undefined pattern so the envelope stays bytewise-identical on older
+  // gateway versions.
+  blurhash_data_url?: string | null;
+  asset_schema?: "v1.49" | "v1.50" | "v1.54" | null;
 }
 
 function escapeHtmlAttr(s: string): string {
@@ -317,6 +323,15 @@ function buildAssetRef(
     image_info: imageInfoField,
     image_exif: imageExifField,
     image_exif_policy: imageExifPolicyField,
+
+    // v1.54: shape-contract fields. Omit-when-undefined so pre-v1.54
+    // envelopes stay bytewise-identical (no null injection).
+    ...(resp.blurhash_data_url !== undefined
+      ? { blurhash_data_url: resp.blurhash_data_url }
+      : {}),
+    ...(resp.asset_schema !== undefined
+      ? { asset_schema: resp.asset_schema }
+      : {}),
 
     scriptTag(opts) {
       // Default `defer: true` — modern best practice. Defer prevents
@@ -600,6 +615,13 @@ export class Assets {
       ...(entry.image_exif !== undefined ? { image_exif: entry.image_exif } : {}),
       ...(entry.image_exif_policy !== undefined
         ? { image_exif_policy: entry.image_exif_policy }
+        : {}),
+      // v1.54 shape-contract pass-through.
+      ...(entry.blurhash_data_url !== undefined
+        ? { blurhash_data_url: entry.blurhash_data_url }
+        : {}),
+      ...(entry.asset_schema !== undefined
+        ? { asset_schema: entry.asset_schema }
         : {}),
     };
     return buildAssetRef(completion, contentType);

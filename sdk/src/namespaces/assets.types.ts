@@ -452,6 +452,26 @@ export interface AssetRef {
   /** Echo of the EXIF policy actually applied to the stored bytes. `null`
    *  for non-image uploads. */
   image_exif_policy: ExifPolicy | null;
+
+  // ---- v1.54+ shape-contract fields ----------------------------------------
+  // Populated atomically at upload time when the v1.54+ gateway encoder runs.
+  // Surfaced on AssetRef so consumers (`<Run402Image>`, agent code that
+  // rehydrates stored AssetRefs) can render placeholders + apply
+  // schema-filtered strict-mode without an extra DB roundtrip.
+
+  /** Pre-decoded PNG data URL (~600-1200 bytes typical at 16×16) computed
+   *  once at upload time from the canonical pinned BlurHash decoder.
+   *  `<Run402Image>` emits this as the placeholder `background-image` so
+   *  render is pure-local (no SSR-time decode). `null` when the decoder
+   *  failed on otherwise-valid input (rare). Omitted for non-image and
+   *  pre-v1.54 uploads. */
+  blurhash_data_url?: string | null;
+  /** Semver shape-contract stamp recording the highest contract this row's
+   *  fields satisfy. `null` for partial-shape rows (e.g., HEIC sources
+   *  missing `display_jpeg`). Read by `<Run402Image>` strict mode
+   *  (`imageDefaults.strict: { onSchema: ">=v1.49" }`) to skip legacy rows.
+   *  Omitted for pre-v1.54 uploads. */
+  asset_schema?: "v1.49" | "v1.50" | "v1.54" | null;
 }
 
 /**

@@ -3204,6 +3204,10 @@ function buildAssetManifestFromPlanEntries(
     if (ref.image_info !== undefined) e.image_info = ref.image_info;
     if (ref.image_exif !== undefined) e.image_exif = ref.image_exif;
     if (ref.image_exif_policy !== undefined) e.image_exif_policy = ref.image_exif_policy;
+    // v1.54 pass-through: shape-contract fields. Pre-v1.54 plan responses
+    // omit them; the manifest entry stays bytewise-identical to before.
+    if (ref.blurhash_data_url !== undefined) e.blurhash_data_url = ref.blurhash_data_url;
+    if (ref.asset_schema !== undefined) e.asset_schema = ref.asset_schema;
     list.push(e);
     byKey[entry.key] = e;
     manifest[entry.key] = e;
