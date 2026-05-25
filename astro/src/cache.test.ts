@@ -62,7 +62,11 @@ describe("BuildCache", () => {
     const expected = join(root, "node_modules", ".run402", "assetMap.json");
     assert.ok(existsSync(expected), "cache file should exist");
     const parsed = JSON.parse(readFileSync(expected, "utf-8"));
-    assert.equal(parsed.version, 1);
+    // Cache schema is currently v2 (v1.50 + v1.54 AssetRef additions).
+    // Bumping CACHE_SCHEMA_VERSION should also bump this assertion AND
+    // add a new "drops a v<previous> cache file" test to the migration
+    // suite below — see cache.ts header for the rationale.
+    assert.equal(parsed.version, 2);
     assert.ok(parsed.entries["/abs/hero.jpg"]);
   });
 
@@ -114,5 +118,64 @@ describe("BuildCache", () => {
     writeFile(join(cacheDir, "assetMap.json"), "{not json{}", "utf-8");
     const cache = new BuildCache(root);
     assert.equal(cache.size(), 0);
+  });
+
+  // Regression: pre-v2 cache files (written before v1.54 AssetRef shape
+  // added `blurhash_data_url` + `asset_schema`) were silently returned
+  // verbatim on cache hit, dropping the new fields from
+  // `dist/_assets-manifest.json`. Bumping CACHE_SCHEMA_VERSION to 2
+  // invalidates those caches and forces a fresh AssetRef on the next
+  // build. If this test fails after a future schema bump, also bump
+  // CACHE_SCHEMA_VERSION here AND add a new test asserting v2 caches
+  // are dropped at the new version.
+  it("drops a v1 cache file on load (schema migration v1 → v2)", async () => {
+    const cacheDir = join(root, "node_modules", ".run402");
+    const { mkdirSync: mkdir, writeFileSync: writeFile } = await import("node:fs");
+    mkdir(cacheDir, { recursive: true });
+    const v1File = {
+      version: 1,
+      entries: {
+        "/abs/legacy.jpg": {
+          sha256: sampleRef.sha256,
+          assetRef: sampleRef,
+          cachedAt: Date.now() - 86_400_000,
+        },
+      },
+    };
+    writeFile(join(cacheDir, "assetMap.json"), JSON.stringify(v1File), "utf-8");
+    const cache = new BuildCache(root);
+    assert.equal(cache.size(), 0, "v1 entries should be discarded");
+    assert.equal(
+      cache.get("/abs/legacy.jpg", sampleRef.sha256),
+      null,
+      "lookup against the pre-bump entry must miss so the uploader re-fetches a fresh AssetRef",
+    );
+  });
+
+  it("round-trips v1.54 fields (blurhash_data_url + asset_schema) through set/get", () => {
+    const v154Ref: AssetRef = {
+      ...sampleRef,
+      metadata: { tag: "hero" },
+      image_format: "jpeg",
+      image_info: { has_alpha: false, color_space: "srgb" },
+      image_exif: null,
+      image_exif_policy: "strip",
+      blurhash_data_url: "data:image/png;base64,iVBORw0KGgoAAAA",
+      asset_schema: "v1.54",
+    };
+    const cache = new BuildCache(root);
+    cache.set("/abs/hero.jpg", v154Ref.sha256, v154Ref);
+
+    // Same-process read.
+    const same = cache.get("/abs/hero.jpg", v154Ref.sha256);
+    assert.deepEqual(same, v154Ref);
+
+    // Roundtrip via the on-disk file (catches accidental field stripping
+    // in flush()/load(), which is the actual class of bug v2 prevents).
+    const fresh = new BuildCache(root);
+    const reloaded = fresh.get("/abs/hero.jpg", v154Ref.sha256);
+    assert.deepEqual(reloaded, v154Ref);
+    assert.equal(reloaded?.blurhash_data_url, v154Ref.blurhash_data_url);
+    assert.equal(reloaded?.asset_schema, "v1.54");
   });
 });

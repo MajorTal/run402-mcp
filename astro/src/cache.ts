@@ -10,6 +10,23 @@
  * to match the cached entry. A rename invalidates the OLD path's entry on
  * the next build (when no `<Image>` reference points at it anymore); a content
  * change at the same path invalidates the entry via the sha mismatch.
+ *
+ * **Bumping `CACHE_SCHEMA_VERSION` — required discipline whenever AssetRef
+ * gains a field.** The cache stores AssetRef objects verbatim by source SHA.
+ * If the SDK / gateway starts returning a new field but the cache version
+ * doesn't change, every build with unchanged source bytes is a cache HIT and
+ * the new field never makes it into the cached AssetRef — silently producing
+ * stale manifests that look correct (legacy fields populate) but lack the
+ * additions. This was the v1.54 `blurhash_data_url` / `asset_schema` bug.
+ *
+ * Bump on:
+ *   - any new AssetRef field the gateway can emit (even an optional one)
+ *   - any new derived field the SDK or this package adds at adapt time
+ *   - any change to the `CacheEntry` / `CacheFile` shape
+ *
+ * Bumping is non-destructive: stale entries are dropped silently and the
+ * next build re-uploads (or, more commonly, gets a CAS dedupe at the
+ * gateway and re-receives a fresh, fully-populated AssetRef).
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,7 +35,15 @@ import type { AssetRef, CacheEntry, CacheFile } from "./types.js";
 
 const CACHE_DIR_REL = "node_modules/.run402";
 const CACHE_FILE_REL = "node_modules/.run402/assetMap.json";
-const CACHE_SCHEMA_VERSION = 1;
+/**
+ * Bump whenever AssetRef gains a field (see file header for full discipline).
+ * History:
+ *   - 1 — initial v1.49 AssetRef shape.
+ *   - 2 — v1.54 AssetRef additions (`blurhash_data_url`, `asset_schema`)
+ *         plus the v1.50 fields (`metadata`, `image_format`, `image_info`,
+ *         `image_exif`, `image_exif_policy`) the local type now mirrors.
+ */
+const CACHE_SCHEMA_VERSION = 2;
 const GITIGNORE_LINE = "node_modules/.run402/";
 
 export class BuildCache {

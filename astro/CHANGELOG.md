@@ -2,6 +2,20 @@
 
 All notable changes to `@run402/astro`.
 
+## Unreleased
+
+### Fixed
+
+- **Stale `dist/_assets-manifest.json` entries missing v1.54 AssetRef fields.** The build cache at `node_modules/.run402/assetMap.json` stores AssetRefs verbatim by source SHA; when the gateway started emitting `blurhash_data_url` + `asset_schema` (v1.54), existing caches kept returning pre-v1.54 AssetRefs on hit, silently producing manifests that looked correct (legacy fields populated) but lacked the v1.54 additions. Bumped `CACHE_SCHEMA_VERSION` from `1` to `2` so existing caches invalidate on first run after upgrade. Reproducer: `rm -f node_modules/.run402/assetMap.json && npm run build` then `jq '.assets[<key>] | {blurhash_data_url, asset_schema}' dist/_assets-manifest.json` populates both fields.
+
+### Changed
+
+- **`AssetRef` widened to mirror the current SDK shape.** Adds the v1.50 metadata + EXIF fields (`metadata`, `image_format`, `image_info`, `image_exif`, `image_exif_policy`) and v1.54 shape-contract fields (`blurhash_data_url`, `asset_schema`) the runtime already passed through. Plus the supporting `AssetMetadata` + `ExifPolicy` exports. Strictly additive — pre-existing consumers continue to type-check unchanged, but `as any` casts at field-access sites can now be removed.
+
+### Internal
+
+- New cache.ts header documents the AssetRef-field-add → cache-version-bump discipline that prevents future occurrences of this bug; `cache.test.ts` gains a v1 → v2 migration regression test and a v1.54-field roundtrip guard.
+
 ## 1.0.0-alpha.1 — unreleased
 
 The agent-DX-locked default-export preset (Finding 5 in the design-review consultation). One-line `astro.config.mjs`:

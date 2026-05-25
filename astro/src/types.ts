@@ -1,13 +1,18 @@
 /**
  * Shared types for `@run402/astro`.
  *
- * Mirrors the v1.49 AssetRef shape so the package doesn't have to deep-import
+ * Mirrors the current AssetRef shape (v1.49 base + v1.50 metadata/EXIF +
+ * v1.54 shape-contract fields) so the package doesn't have to deep-import
  * SDK internals (the SDK doesn't currently export `AssetRef` from `./node`,
  * only via `./` — but we want to stay self-contained so the package still
  * type-checks if the SDK refactors its public surface).
  *
- * Keep this file in lockstep with the v1.49 `internal.blob_image_variants`
- * shape and `services/asset-slice.ts` `ResolvedAssetRef`.
+ * **Lockstep + cache discipline:** keep this file in lockstep with the
+ * gateway's `services/asset-slice.ts` `ResolvedAssetRef` shape. When you
+ * add a field here, ALSO bump `CACHE_SCHEMA_VERSION` in `./cache.ts` —
+ * the build cache stores AssetRefs verbatim by source SHA, so a forgotten
+ * version bump means stale builds silently drop the new field (see the
+ * cache.ts header for the full story).
  */
 
 /** A single pre-encoded variant entry returned by the gateway. */
@@ -20,7 +25,26 @@ export interface AssetVariant {
   sha256: string;
 }
 
-/** The full v1.49 AssetRef including image-intrinsic fields. */
+/**
+ * The full AssetRef returned by `r.assets.put` and stored verbatim in the
+ * build cache + emitted into `dist/_assets-manifest.json`.
+ *
+ * Field generations:
+ *   - core (v1.45): `key`, `sha256`, `size_bytes`, `content_type`, `url`,
+ *     `cdn_url`, plus `immutable_url`, `cdn_immutable_url`, `etag`, `sri`.
+ *   - v1.49 image-intrinsic: `width_px`, `height_px`, `blurhash`,
+ *     `variant_spec_version`, `display_url`, `display_immutable_url`,
+ *     `variants`.
+ *   - v1.50 metadata + EXIF: `metadata`, `image_format`, `image_info`,
+ *     `image_exif`, `image_exif_policy` — `null` on non-image uploads
+ *     (the wire shape is widen-to-null, not omit), `null` for fields the
+ *     pipeline couldn't compute.
+ *   - v1.54 shape contract: `blurhash_data_url`, `asset_schema` — omitted
+ *     entirely (not `null`) on pre-v1.54 uploads; the omit pattern is what
+ *     `<Run402Image>` strict-mode keys off to skip legacy rows.
+ *
+ * Adding a field here? Bump `CACHE_SCHEMA_VERSION` in `./cache.ts`.
+ */
 export interface AssetRef {
   key: string;
   sha256: string;
@@ -48,7 +72,32 @@ export interface AssetRef {
         display_jpeg?: AssetVariant;
       }
     | undefined;
+
+  // v1.50 metadata + EXIF policy + image intrinsics. Wire shape is
+  // widen-to-null on non-image uploads (NOT omit) — keeps the JSON inventory
+  // wire-shape stable.
+  metadata?: AssetMetadata | null;
+  image_format?: string | null;
+  image_info?: Record<string, unknown> | null;
+  image_exif?: Record<string, unknown> | null;
+  image_exif_policy?: ExifPolicy | null;
+
+  // v1.54 shape-contract fields (omitted entirely — NOT null — on pre-v1.54
+  // uploads). Surfaced so `<Run402Image>` placeholder rendering +
+  // schema-filtered strict-mode work without a DB roundtrip.
+  blurhash_data_url?: string | null;
+  asset_schema?: "v1.49" | "v1.50" | "v1.54" | null;
 }
+
+/** Caller-supplied metadata block. ≤4 KB serialized; leaf values may be
+ *  `string | number | boolean | string[]`. The gateway echoes this back
+ *  verbatim on AssetRef. */
+export type AssetMetadata = Record<string, string | number | boolean | string[]>;
+
+/** EXIF retention policy applied to an image upload. `"strip"` removes
+ *  the EXIF block at upload time; `"preserve"` keeps it; `"redact"` keeps
+ *  the structural keys but blanks GPS / serial-number / lens-info fields. */
+export type ExifPolicy = "strip" | "preserve" | "redact";
 
 /** Options accepted by the `run402()` integration factory. */
 export interface Run402AstroOptions {
@@ -173,8 +222,10 @@ export interface CacheEntry {
 
 /** Shape of the on-disk cache file. */
 export interface CacheFile {
-  /** Cache schema version — bump on incompatible AssetRef shape change. */
-  version: 1;
+  /** Cache schema version. Bump in lockstep with `CACHE_SCHEMA_VERSION` in
+   *  `./cache.ts` whenever `AssetRef` gains a field — see that file's header
+   *  for the full discipline. v1 → v2 bump: v1.50 + v1.54 AssetRef fields. */
+  version: 2;
   entries: { [absolutePath: string]: CacheEntry };
 }
 
