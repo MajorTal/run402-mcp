@@ -96,21 +96,25 @@ export async function run(sub, args = []) {
     });
   }
 
-  // 3. Keystore.
+  // 3. Project keystore. The wallet itself lives in allowance.json (verified
+  // by check 2 above); this checks the per-project keys (anon_key /
+  // service_key) that `run402 projects provision` writes. An empty store is
+  // normal for fresh installs that haven't provisioned a project yet, so
+  // report informationally as `ok` rather than warning.
   try {
     const keystore = loadKeyStore();
-    const walletCount = Object.keys(keystore?.wallets ?? {}).length;
+    const projectCount = Object.keys(keystore?.projects ?? {}).length;
     checks.push({
-      name: "keystore",
-      status: walletCount > 0 ? "ok" : "empty",
-      value: { wallet_count: walletCount },
-      ...(walletCount === 0 && {
-        hint: "Run 'run402 init' to generate a wallet.",
+      name: "projects",
+      status: "ok",
+      value: { project_count: projectCount },
+      ...(projectCount === 0 && {
+        hint: "No projects yet — run 'run402 projects provision' to create one (wallet is already set up).",
       }),
     });
   } catch (err) {
     checks.push({
-      name: "keystore",
+      name: "projects",
       status: "error",
       message: err instanceof Error ? err.message : String(err),
     });
