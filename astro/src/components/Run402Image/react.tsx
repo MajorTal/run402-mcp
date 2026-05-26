@@ -166,6 +166,8 @@ export const Run402Image = Run402ImageInner as unknown as ReactComponent<Run402I
 export type { AssetRef } from "@run402/functions";
 export type {
   Run402ImageProps,
+  Run402ImageAsset,
+  Run402ImageAssetVariant,
   DataAttributes,
   ImageDefaults,
   PreloadAttrs,

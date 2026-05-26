@@ -35,8 +35,6 @@
  * does NOT skip it.
  */
 
-import type { AssetRef } from "@run402/functions";
-
 import {
   Run402ImageError,
   type DegradationEntry,
@@ -47,9 +45,16 @@ import {
   type PreloadAttrs,
   type RenderContext,
   type RenderTreeNode,
+  type Run402ImageAsset,
   type Run402ImageProps,
   type SourceAttrs,
 } from "./types.js";
+
+// v1.0.3 — `<Run402Image>` declares what it consumes, not the broader SDK
+// `AssetRef`. `Run402ImageAsset` (in types.ts) is a structural supertype of
+// both the SDK's `AssetRef` (broader) and the manifest pipeline's `AssetRef`
+// (narrower) so both flow into `<Run402Image asset={…}>` without casting.
+// See GH #401.
 
 // =============================================================================
 // Error-code constants (single source — all references go through these)
@@ -302,7 +307,7 @@ function validateProps(props: Run402ImageProps): void {
 // 2.8 — HEIC correctness floor (unconditional hard-fail)
 // =============================================================================
 
-function enforceHeicCorrectnessFloor(asset: AssetRef): void {
+function enforceHeicCorrectnessFloor(asset: Run402ImageAsset): void {
   const ct = asset.content_type;
   if (ct !== "image/heic" && ct !== "image/heif") return;
   if (asset.variants?.display_jpeg) return;
@@ -341,7 +346,7 @@ function enforceHeicCorrectnessFloor(asset: AssetRef): void {
  * is what the gateway sets for HEIC sources (points at the JPEG variant);
  * for non-HEIC sources `display_url === cdn_url` so the fallback is a no-op.
  */
-function resolveImgSrc(asset: AssetRef): string {
+function resolveImgSrc(asset: Run402ImageAsset): string {
   if (typeof asset.display_url === "string" && asset.display_url !== "") {
     return asset.display_url;
   }
@@ -375,7 +380,7 @@ interface OrderedVariant {
  * gateway eventually produces AVIF variants, this function stays unchanged
  * — the source-type-precedence footgun is documented in the spec.
  */
-function collectOrderedVariants(asset: AssetRef): OrderedVariant[] {
+function collectOrderedVariants(asset: Run402ImageAsset): OrderedVariant[] {
   const variants = asset.variants;
   if (!variants) return [];
 
@@ -401,7 +406,7 @@ function collectOrderedVariants(asset: AssetRef): OrderedVariant[] {
 // =============================================================================
 
 function enforceSizesRequired(
-  asset: AssetRef,
+  asset: Run402ImageAsset,
   sizes: string | undefined,
   variantCount: number,
 ): void {
@@ -429,7 +434,7 @@ function enforceSizesRequired(
 
 type AssetSchema = "v1.49" | "v1.50" | "v1.54" | null;
 
-function resolveAssetSchema(asset: AssetRef): AssetSchema {
+function resolveAssetSchema(asset: Run402ImageAsset): AssetSchema {
   const raw = asset.asset_schema;
   if (raw === "v1.49" || raw === "v1.50" || raw === "v1.54") return raw;
   return null;
@@ -522,7 +527,7 @@ function projectFilteredOutLegacyAsset(
 }
 
 interface StrictModeInputs {
-  asset: AssetRef;
+  asset: Run402ImageAsset;
   placeholder: "auto" | "blurhash" | "none";
   strictApplies: boolean;
   variantCount: number;
@@ -561,7 +566,7 @@ function enforceStrictMode(input: StrictModeInputs): void {
 
 function throwStrictDegraded(
   subcode: "NO_VARIANTS" | "NO_INTRINSICS" | "NO_PLACEHOLDER" | "NO_CDN_URL" | "WRONG_SHAPE",
-  asset: AssetRef,
+  asset: Run402ImageAsset,
   missing: string[],
 ): never {
   throw new Run402ImageError({
@@ -609,7 +614,7 @@ function resolvePlaceholder(
  * — a visibly broken placeholder.
  */
 function buildPlaceholderStyle(
-  asset: AssetRef,
+  asset: Run402ImageAsset,
   placeholder: "auto" | "blurhash" | "none",
 ): string {
   if (placeholder === "none") return "";
@@ -658,9 +663,17 @@ function mergeStyles(
   // format matches React's `renderToStaticMarkup` object-style serialization
   // — `key:value;key:value` (NO spaces, NO trailing semicolon) — so the
   // Astro adapter and React adapter produce byte-identical HTML.
+  //
+  // v1.0.3 — `callerStyle` may be `React.CSSProperties`, whose values are
+  // typed as `string | number | undefined | …`. Skip undefined/null values
+  // so we never serialize `object-fit:undefined`; the merge result is
+  // byte-identical to the pre-widening behavior for plain `Record<string,
+  // string | number>` inputs.
   const componentProps = parseInlineStyle(componentStyle);
   const callerProps: Record<string, string | number> = {};
-  for (const [k, v] of Object.entries(callerStyle)) {
+  for (const [k, v] of Object.entries(callerStyle as Record<string, unknown>)) {
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "string" && typeof v !== "number") continue;
     callerProps[normalizeStyleKey(k)] = v;
   }
   const merged = { ...componentProps, ...callerProps };
@@ -972,7 +985,7 @@ function linkToPreloadAttrs(link: LinkAttrs): PreloadAttrs {
 // =============================================================================
 
 interface DegradationInputs {
-  asset: AssetRef;
+  asset: Run402ImageAsset;
   placeholder: "auto" | "blurhash" | "none";
   variantCount: number;
   recordDegradation?: (entry: DegradationEntry) => void;

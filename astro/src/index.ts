@@ -313,7 +313,19 @@ function configRootToPath(root: URL | string | undefined): string {
 // applies to anything imported from `'@run402/astro'`.
 
 // Type re-exports for consumers.
-export type { AssetRef, AssetVariant, ImageProps, Run402AstroOptions } from "./types.js";
+//
+// v1.0.3 (GH #401) — `AssetRef` from this entry now resolves to the SDK's
+// `AssetRef` from `@run402/functions`, matching what `@run402/astro/react`
+// and `@run402/astro/components` already export. This lets consumers write
+// `import type { AssetRef } from "@run402/astro"` and get the same shape
+// `<Run402Image asset={…}>` and `r.assets.put` use, without dual-importing.
+// The narrower manifest-pipeline shape (what `resolveVariants` returns and
+// what `dist/_assets-manifest.json` stores) is still exported under
+// `Run402AstroManifestAssetRef` for consumers that need to introspect the
+// manifest JSON shape directly.
+export type { AssetRef } from "@run402/functions";
+export type { AssetRef as Run402AstroManifestAssetRef } from "./types.js";
+export type { AssetVariant, ImageProps, Run402AstroOptions } from "./types.js";
 
 // --------------------------------------------------------------------------
 // v1.0 preset — default export `run402()` returns `AstroUserConfig`.

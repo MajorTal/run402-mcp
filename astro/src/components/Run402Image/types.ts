@@ -27,7 +27,81 @@
  * not stringified HTML" for the rationale.
  */
 
-import type { AssetRef } from "@run402/functions";
+import type { CSSProperties } from "react";
+
+// =============================================================================
+// Run402ImageAsset — structural-subset asset shape the component actually reads
+// =============================================================================
+
+/**
+ * Minimal asset shape consumed by `<Run402Image>`. v1.0.3 — see GH #401.
+ *
+ * `Run402ImageProps.asset` used to be typed as `AssetRef` from `@run402/functions`,
+ * which is the broad SDK-side shape (`visibility`, `immutable`, `content_digest`,
+ * camelCase mirrors, …). Two real callers — values returned by `r.assets.put` /
+ * `r.assets.fromRef` AND values returned by `resolveVariants(manifest, key)`
+ * from `@run402/astro/manifest` — both have to flow into the same `<Run402Image
+ * asset={…}>` site. Pinning to the broader SDK shape made the manifest-pipeline
+ * shape (a structural subset) fail type-check even though `<Run402Image>` only
+ * reads `cdn_url + variants + width_px + height_px + blurhash_data_url +
+ * asset_schema` at runtime.
+ *
+ * The component declares what it consumes, not what its data source happens to
+ * produce. `Run402ImageAsset` is the structural supertype of every supported
+ * shape — both the SDK's `AssetRef` (broader) and the manifest's `AssetRef`
+ * (narrower) satisfy it. Runtime validation still enforces a non-empty
+ * `cdn_url` string, so the `string | null` value type here just lets us accept
+ * the SDK shape verbatim; nulls fail validation immediately with
+ * `R402_ASTRO_IMAGE_ASSET_WRONG_SHAPE`.
+ */
+export interface Run402ImageAsset {
+  /** Required at runtime as a non-empty string. Typed `string | null` so the
+   *  SDK's `AssetRef` (which permits `null` for private assets) is assignable. */
+  cdn_url: string | null;
+  /** Optional — used only in error messages + degradation-manifest entries. */
+  key?: string;
+  /** Optional — used only in error messages + degradation-manifest entries. */
+  sha256?: string;
+  /** Optional. Validated to be `image/*` when present; non-image throws
+   *  `R402_ASTRO_IMAGE_NON_IMAGE_ASSET`. HEIC sources without a `display_jpeg`
+   *  variant throw `R402_ASTRO_IMAGE_HEIC_NO_TRANSCODE`. */
+  content_type?: string;
+  /** Preferred over `cdn_url` for the rendered `<img src>` when non-empty.
+   *  Targets the HEIC `display_jpeg` variant for HEIC sources. */
+  display_url?: string | null;
+  /** Drives `<img width=…>` (caller's `width` prop overrides). */
+  width_px?: number;
+  /** Drives `<img height=…>` (caller's `height` prop overrides). */
+  height_px?: number;
+  /** Pre-decoded LQIP data URL; rendered as the `<img>`'s `background-image`. */
+  blurhash_data_url?: string | null;
+  /** Shape-contract stamp consumed by schema-filtered strict mode. */
+  asset_schema?: "v1.49" | "v1.50" | "v1.54" | null;
+  /** Per-variant `<source srcset>` entries plus the HEIC `display_jpeg`
+   *  fallback. */
+  variants?: {
+    thumb?: Run402ImageAssetVariant;
+    medium?: Run402ImageAssetVariant;
+    large?: Run402ImageAssetVariant;
+    display_jpeg?: Run402ImageAssetVariant;
+  };
+}
+
+/**
+ * Minimal variant entry shape consumed by `<Run402Image>`.
+ *
+ * The component reads `cdn_url ?? url` for the variant URL (with a runtime
+ * null/empty check) and `width_px` for the srcset width descriptor. `format`
+ * drives the `<source type=…>` attribute and defaults to `"webp"` when
+ * missing. Other variant fields (`sha256`, `height_px`, `immutable_url`,
+ * `cdn_immutable_url`, `kind`) are ignored by the component.
+ */
+export interface Run402ImageAssetVariant {
+  url?: string | null;
+  cdn_url?: string | null;
+  width_px: number;
+  format?: "webp" | "jpeg";
+}
 
 // =============================================================================
 // 1.1 — Run402ImageProps interface (binding source of truth)
@@ -46,11 +120,15 @@ import type { AssetRef } from "@run402/functions";
  * adding a new optional field is minor; removing or retyping is major.
  */
 export interface Run402ImageProps extends DataAttributes {
-  /** The image source — typed AssetRef from `r.assets.put` / `r.assets.fromRef`.
-   *  String URLs are rejected (`R402_ASTRO_IMAGE_ASSET_STRING_URL`); null
-   *  / undefined rejected (`R402_ASTRO_IMAGE_ASSET_MISSING`); objects without
-   *  a `cdn_url` field rejected (`R402_ASTRO_IMAGE_ASSET_WRONG_SHAPE`). */
-  asset: AssetRef;
+  /** The image source — any object structurally matching `Run402ImageAsset`.
+   *  In practice this covers both the SDK's `AssetRef` (returned by
+   *  `r.assets.put` / `r.assets.fromRef`) and the manifest's `AssetRef`
+   *  (returned by `resolveVariants(manifest, key)` from
+   *  `@run402/astro/manifest`). String URLs are rejected
+   *  (`R402_ASTRO_IMAGE_ASSET_STRING_URL`); null / undefined rejected
+   *  (`R402_ASTRO_IMAGE_ASSET_MISSING`); objects without a non-empty
+   *  `cdn_url` rejected (`R402_ASTRO_IMAGE_ASSET_WRONG_SHAPE`). */
+  asset: Run402ImageAsset;
   /** Required at the type level. Empty string (`alt=""`) signals decorative
    *  per HTML5 §4.7.4.4 and is allowed. */
   alt: string;
@@ -102,8 +180,14 @@ export interface Run402ImageProps extends DataAttributes {
    *  semantics" requirement — caller wins on property overlap.
    *  Note: callers passing `background: <shorthand>` will reset the
    *  placeholder `background-image`; use longhand (`background-color`,
-   *  `background-size`, etc.) to preserve it. */
-  style?: string | Record<string, string | number>;
+   *  `background-size`, etc.) to preserve it.
+   *
+   *  v1.0.3 — accepts `React.CSSProperties` directly so consumers of the
+   *  React entry can pass strongly-typed style objects (`{ objectFit:
+   *  'cover' }`) without casting through `Record<string, string | number>`.
+   *  Astro consumers may still pass the looser string / object-of-strings
+   *  shape — both serialize identically. See GH #401. */
+  style?: string | CSSProperties | Record<string, string | number>;
   /** Forwarded to the outermost element. */
   id?: string;
   /** Forwarded verbatim. Component does NOT emit by default. */
@@ -187,6 +271,10 @@ export type AstroComponent<P> = ((props: P) => unknown) & {
 // produced by a module without proper imports" issue when consumers
 // don't have @types/react installed. The ReactElement | null shape is
 // what JSX expects + survives the brand intersection.
+//
+// `CSSProperties` is imported at the top of this file for the
+// `Run402ImageProps.style` widening (v1.0.3, GH #401).
+
 import type { ReactElement } from "react";
 
 export type ReactComponent<P> = ((props: P) => ReactElement | null) & {
