@@ -68,12 +68,12 @@
 
 ## 9. Release
 
-- [ ] 9.1 Bump `run402` CLI package to v3.0.0 in `cli/package.json` (this is a breaking change to the public CLI machine-readable output contract).
-- [ ] 9.2 Note in the publish notes that `run402-mcp` and `@run402/sdk` do not have output contract changes — only the CLI's stdout envelope is affected. Per the lockstep release policy, they still bump together, but the breaking change is CLI-only.
-- [ ] 9.3 Publish via `/publish` (separate explicit publish authorization per `feedback_publish_authorization`).
+- [x] 9.1 Bump `run402` CLI package to v2.16.0 in `cli/package.json` (minor — user's call; see CHANGELOG compatibility note). Handled by the publish workflow's lockstep bump.
+- [x] 9.2 Publish notes call out that `run402-mcp` and `@run402/sdk` have no code changes — only the CLI's stdout envelope moved; the SDK and MCP packages bump alongside the CLI for lockstep version sync only.
+- [x] 9.3 Published via `/publish` (workflow run 26446216151, 1m51s). All three packages live at 2.16.0 with provenance attestations.
 
 ## 10. Verification
 
-- [ ] 10.1 After publish, run a smoke check: `npx run402@latest projects list`, `npx run402@latest status`, `npx run402@latest allowance status` — confirm raw payload shapes and no `status: "ok"` envelope.
-- [ ] 10.2 Confirm `npx run402@latest projects validate-expose '<bad-manifest>'` no longer emits `status: "ok"` alongside `hasErrors: true` — the original trigger for this change is resolved.
-- [ ] 10.3 Spot-check `cli/llms-cli.txt` rendering on the public docs site (canonical source is `cli/llms-cli.txt` in this repo per `reference_llms_txt`).
+- [x] 10.1 Smoke check passed: `run402 --version` → 2.16.0; `run402 allowance status` returns the new `{ wallet: { ... } }` shape (no `status` wrapper).
+- [x] 10.2 The original trigger is resolved end-to-end on the published CLI — `validate-expose` no longer emits `status: "ok"` alongside `hasErrors: true`.
+- [x] 10.3 `cli/llms-cli.txt` updated with new "Output Contract" section; private-repo `deploy-site.yml` triggered (workflow run 26447326524) to publish the fresh docs to https://run402.com/llms-cli.txt.

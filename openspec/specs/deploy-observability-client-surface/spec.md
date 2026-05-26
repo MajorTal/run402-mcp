@@ -152,13 +152,13 @@ The commands SHALL be:
 
 When `--project` is omitted, the CLI SHALL use the active project id using the same local config behavior as other project-scoped commands.
 
-Successful commands SHALL print JSON to stdout without colliding with gateway fields. Inventory commands SHALL print `{ "status": "ok", "release": <ReleaseInventory> }`; diff commands SHALL print `{ "status": "ok", "diff": <ReleaseToReleaseDiff> }`. Errors SHALL use the existing SDK error reporting path.
+Successful commands SHALL print the natural JSON payload to stdout without a top-level `status` wrapper, conforming to the `cli-output-shape` capability. Inventory commands SHALL print `{ "release": <ReleaseInventory> }`; diff commands SHALL print `{ "diff": <ReleaseToReleaseDiff> }`. Errors SHALL use the existing SDK error reporting path on stderr (which retains `status: "error"` as the sentinel).
 
 #### Scenario: CLI gets a release by id
 
 - **WHEN** a user runs `run402 deploy release get rel_123 --project prj_123`
 - **THEN** the CLI SHALL call `r.deploy.getRelease({ project: "prj_123", releaseId: "rel_123" })`
-- **AND** print a JSON envelope with `status: "ok"` and `release.kind: "release_inventory"`
+- **AND** print a JSON object with `release.kind: "release_inventory"` and NO top-level `status` field
 
 #### Scenario: CLI active release documents current-live semantics
 
@@ -170,7 +170,7 @@ Successful commands SHALL print JSON to stdout without colliding with gateway fi
 
 - **WHEN** a user runs `run402 deploy release diff --from empty --to active --project prj_123`
 - **THEN** the CLI SHALL call `r.deploy.diff({ project: "prj_123", from: "empty", to: "active" })`
-- **AND** print a JSON envelope with `status: "ok"` and `diff.kind: "release_diff"`
+- **AND** print a JSON object with `diff.kind: "release_diff"` and NO top-level `status` field
 
 #### Scenario: CLI help exposes nested release help
 
