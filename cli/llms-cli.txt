@@ -672,6 +672,28 @@ Built-in policies (one per table):
 
 `—` = denied. `service_key` bypasses all policies. **Views** are always created with `security_invoker=true` — they inherit the underlying table's RLS. **RPCs** require an entry in `rpcs[*]` with `grant_to` to be callable as `/rest/v1/rpc/<fn>` (since v1.30, `CREATE FUNCTION` revokes PUBLIC EXECUTE automatically).
 
+Worked example covering all three slices (drop in as `manifest.json` or under `database.expose` in a deploy manifest):
+
+```json
+{
+  "$schema": "https://run402.com/schemas/manifest.v1.json",
+  "version": "1",
+  "tables": [
+    { "name": "posts", "expose": true, "policy": "public_read_authenticated_write" },
+    { "name": "notes", "expose": true, "policy": "user_owns_rows", "owner_column": "user_id", "force_owner_on_insert": true }
+  ],
+  "views": [
+    { "name": "posts_public", "base": "posts", "select": ["id", "title", "published_at"], "expose": true }
+  ],
+  "rpcs": [
+    { "name": "increment_counter", "signature": "(counter_name text)", "grant_to": ["authenticated"] },
+    { "name": "now_utc", "signature": "()", "grant_to": ["anon", "authenticated"] }
+  ]
+}
+```
+
+`rpcs[*].signature` is the parenthesized argument list — `"()"` for no-arg functions, `"(arg_name type, ...)"` otherwise. The schema regex is `^\([^;]*\)$` (no semicolons, parentheses required). `grant_to` is a non-empty array of Postgres roles — typically `anon`, `authenticated`, `service_role`, or `project_admin`. The function must already exist in your migration SQL with a matching signature; the manifest only grants EXECUTE. Views require `base` plus a non-empty `select`; they are always created `security_invoker=true` and inherit the base table's RLS.
+
 **Imperative escape hatch:** for ad-hoc changes outside a deploy, use `run402 projects apply-expose <project_id> --file manifest.json`. Inspect current state with `run402 projects get-expose <project_id>` — `source: "applied"` means it came from a prior apply; `"introspected"` means it was reconstructed from live DB state.
 
 The manifest is **convergent**: applying the same manifest twice is a no-op; items removed between applies have their policies revoked, grants revoked, triggers dropped, views dropped. Include everything you want exposed in every apply.
