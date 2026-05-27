@@ -861,6 +861,38 @@ Gateway v1.57 moved the lifecycle state machine from `internal.projects` to `int
 
 Operator moderation actions (independent of lifecycle): `run402 admin archive <project_id> [--reason "..."]` sets `archived_at`; `run402 admin reactivate <project_id>` flips it back. Both are scoped to a single project — siblings on the same account keep serving.
 
+## Project transfer (v1.59, two-party handoff)
+
+Hand off a project to another wallet without redeploying. Both sides sign with their own wallet (SIWX); owner-side mutations on the project freeze for the 72-hour pending window so the recipient reviews exactly what they will own.
+
+```bash
+# Initiate (you must currently own the project)
+run402 transfer init --to 0xRECIPIENT --project <project_id> [--message "..."]
+
+# Either party can inspect the safe preview document
+run402 transfer preview <transfer_id>
+
+# Either party can cancel before accept
+run402 transfer cancel <transfer_id> [--reason "..."]
+
+# Recipient accepts (your wallet must equal the transfer's to_wallet)
+run402 transfer accept <transfer_id>
+
+# Inbox / outbox
+run402 transfer list                 # incoming (default)
+run402 transfer list --outgoing
+```
+
+**Freeze invariant.** While `pending`, owner-side mutations against the project (deploy, secrets, custom domains, function CRUD, scheduled-function changes, mailbox config, CI bindings, project rename) return **`409 PROJECT_HAS_PENDING_TRANSFER`** with `details.transfer_id` and a `next_actions[]` cancel route. Data-plane traffic keeps serving. Payment-path routes (tier renew, billing) keep working. The `transfer cancel` route is intentionally unblocked.
+
+**What does NOT transfer:** tier lease (stays with the original owner's billing account; no Phase 1A proration), KMS contract wallets (`run402 contracts ...` — wallet-scoped, not project-scoped), GitHub repo ownership (handle out of band), or on-chain balance on any wallet.
+
+**Billing policy.** Phase 1A supports only `--billing-policy migrate` (default): the project moves into the recipient's billing account. If the recipient has no active billing account yet, the accept returns `409 RECIPIENT_ACCOUNT_NOT_ACTIVE`.
+
+**Secrets rotation prompt.** Secret VALUES are inherited at accept. The accept response returns `secret_names_inherited[]` (names only). The project carries a persistent `secrets_rotation_advised` advisory; `run402 tier status` surfaces it on `projects[].secrets_rotation_advised`. Use `run402 secrets set <project> <name> <value>` to rotate every inherited name; the advisory clears once every one has been re-written.
+
+`run402 tier status` also surfaces `incoming_transfers[]` at the top level (each entry carries `preview_path`) so a single status call shows pending offers without a separate fetch.
+
 ## Image generation
 
 ```bash

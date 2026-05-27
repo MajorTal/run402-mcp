@@ -121,8 +121,9 @@ single-copy single-realm callers as a back-compat path.
 | `NetworkError` | `"network_error"` | Fetch rejected with no HTTP response | `cause` |
 | `LocalError` | `"local_error"` | Local-host issues (filesystem, signing) | `cause` |
 | `Run402DeployError` | `"deploy_error"` | Structured envelope from the deploy state machine (v1.34+) | `code`, `phase`, `operationId`, `safeToRetry`, `mutationState`, `nextActions` |
+| `TransferFreezeError` | `"transfer_freeze"` | HTTP 409 with `code: "PROJECT_HAS_PENDING_TRANSFER"` from the v1.59 transfer-freeze middleware blocking owner-side mutations during a pending transfer | `transferId`, `projectId`, `cancelPath`, `previewPath` |
 
-The exported `Run402ErrorKind` union type (`"payment_required" | "project_not_found" | "unauthorized" | "api_error" | "network_error" | "local_error" | "deploy_error"`) supports exhaustive `switch` statements with TypeScript exhaustiveness checking.
+The exported `Run402ErrorKind` union type (`"payment_required" | "project_not_found" | "unauthorized" | "api_error" | "network_error" | "local_error" | "deploy_error" | "transfer_freeze"`) supports exhaustive `switch` statements with TypeScript exhaustiveness checking.
 
 ```ts
 import {
@@ -163,7 +164,7 @@ try {
 The SDK exports identity-free guards plus a single canonical "should I retry this?" function:
 
 - `isRun402Error(e)` — true for any `Run402Error` subclass instance, regardless of which SDK copy created it.
-- `isPaymentRequired(e)`, `isProjectNotFound(e)`, `isUnauthorized(e)`, `isApiError(e)`, `isNetworkError(e)`, `isLocalError(e)`, `isDeployError(e)` — narrow `unknown` to the named subclass.
+- `isPaymentRequired(e)`, `isProjectNotFound(e)`, `isUnauthorized(e)`, `isApiError(e)`, `isNetworkError(e)`, `isLocalError(e)`, `isDeployError(e)`, `isTransferFreezeError(e)` — narrow `unknown` to the named subclass.
 - `isRetryableRun402Error(e)` — encapsulates the retry policy: `e.retryable || kind === "network_error" || status in {408, 425, 429} || status >= 500`, unless the gateway explicitly sets `retryable: false`. `safeToRetry` alone is not a retry signal; it means a repeated mutation should not duplicate/corrupt state, not that lifecycle/payment/auth gates will become allowed without an action. Returns `false` for non-Run402 inputs so it's safe to call from any `catch` block.
 - `getQuotaScope(e)` — returns `"account"` for pooled billing-account quota denials, `"project"` for the orphan-project fallback when a billing-account row has been purged but cascade has not yet run, and `undefined` for non-quota errors or pre-v1.46 gateways. Safe to call with any `unknown`; reads `Run402Error.quotaScope`, which is lifted from `details.scope` on the gateway envelope.
 
@@ -1301,6 +1302,59 @@ SetLeasePerpetualResult: { status, billing_account_id, lease_perpetual, reactiva
 ArchiveProjectResult:    { status, project_id, archived_at?, reason?, note? }   // note: "already archived"
 ReactivateProjectResult: { status, project_id, reactivated?: true, note? }      // note: "not archived"
 ```
+
+### `r.admin.transfers` (v1.59, two-party project handoff)
+
+Project transfer is exposed as a sub-namespace at `r.admin.transfers`. Both sides sign with their own wallet (SIWX); the accept is atomic and revokes the previous owner's CI bindings on the project.
+
+```
+initiate({ projectId, toWallet, billingPolicy?, message?, kysignedRecordId? })
+  : Promise<InitiateTransferResult>            // { transfer_id, expires_at, project_summary, your_unused_lease_days, lease_refundable: false, terms_sha256 }
+preview(transferId: string): Promise<ProjectTransferPreview>
+  // { transfer_id, project_id, status, from_wallet_display, to_wallet_display, billing_policy,
+  //   message, initiated_at, expires_at, terms_sha256, custom_domains[], subdomains[], functions[],
+  //   secret_names[] (NEVER values), mailbox_summary, ci_bindings_to_be_revoked[], contract_wallets[],
+  //   github_repo_note, billing_implications }
+accept(transferId: string): Promise<AcceptTransferResult>
+  // { project_id, from_wallet, to_wallet, new_billing_account_id, completed_at,
+  //   secrets_rotation_advised: true, secret_names_inherited[], secrets_count_inherited, github_repo_note }
+cancel(transferId: string, reason?: string): Promise<CancelTransferResult>
+  // { transfer_id, status: "cancelled", cancelled_by, cancellation_reason, cancelled_at }
+listIncoming(opts?: { limit?, offset? }): Promise<TransferSummary[]>
+listOutgoing(opts?: { limit?, offset? }): Promise<TransferSummary[]>
+```
+
+`billingPolicy` defaults to `"migrate"` (the only Phase 1A policy — the project moves into the recipient's billing account). The `kysignedRecordId` field is stored verbatim in Phase 1A; Phase 1B will verify it against the canonical terms hash.
+
+While a transfer is `pending` (72h TTL), every owner-side mutation against the project throws `TransferFreezeError` (status 409, code `PROJECT_HAS_PENDING_TRANSFER`). The error carries `transferId`, `projectId`, `cancelPath`, and `previewPath` lifted from the gateway's `next_actions[]`, so agents can present an actionable resolution:
+
+```ts
+import { run402 } from "@run402/sdk/node";
+import { isTransferFreezeError } from "@run402/sdk";
+
+const r = run402();
+
+try {
+  const p = await r.project(projectId);
+  await p.apply({ secrets: { require: ["DB_URL"] } });
+} catch (err) {
+  if (isTransferFreezeError(err) && err.transferId) {
+    // err.transferId, err.cancelPath, err.previewPath
+    await r.admin.transfers.cancel(err.transferId);
+    // …retry the mutation here
+  } else {
+    throw err;
+  }
+}
+```
+
+Data-plane traffic (`/rest/v1/*`, `/storage/v1/*`, function invocation, mailbox send/receive) keeps serving during the freeze. Payment-path routes (`tier.set`, `/billing/v1/*`) keep working. `r.admin.transfers.cancel` is intentionally not blocked.
+
+After `accept`, the project carries a persistent `secrets_rotation_advised` advisory — visible on `r.tier.status()` as `projects[].secrets_rotation_advised: { advised_at, reason }`. Use `r.secrets.set(...)` to rotate every name in `secret_names_inherited`; the advisory clears once every previously-inherited name has been re-written.
+
+`r.tier.status()` also surfaces `incoming_transfers[]` at the top level (each entry includes `preview_path` and the full pending summary) so a single status call shows pending offers without a separate `listIncoming` fetch.
+
+What does NOT transfer: tier lease (stays with the original owner's billing account; no Phase 1A proration), KMS contract wallets (`r.contracts.*` — wallet-scoped), GitHub repo ownership (handle out of band), on-chain balance on any wallet.
 
 ## Resource limits
 

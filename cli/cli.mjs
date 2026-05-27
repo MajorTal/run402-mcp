@@ -28,6 +28,7 @@ Commands:
   admin       Platform-admin operations (lease-perpetual, archive, reactivate)
   deploy      Unified deploy operations (requires active tier)
   ci          Link GitHub Actions OIDC deploy bindings
+  transfer    Two-party project transfer (init, preview, list, accept, cancel)
   jobs        Submit and inspect fixed platform-managed jobs
   functions   Manage serverless functions (deploy, invoke, logs, list, delete)
   secrets     Manage project secrets (set, list, delete)
@@ -138,6 +139,11 @@ switch (cmd) {
   }
   case "ci": {
     const { run } = await import("./lib/ci.mjs");
+    await run(sub, rest);
+    break;
+  }
+  case "transfer": {
+    const { run } = await import("./lib/transfer.mjs");
     await run(sub, rest);
     break;
   }

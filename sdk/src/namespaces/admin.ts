@@ -8,6 +8,7 @@
 
 import type { Client } from "../kernel.js";
 import { LocalError } from "../errors.js";
+import { Transfers } from "./transfers.js";
 
 export interface AgentContact {
   name: string;
@@ -235,7 +236,16 @@ export interface OperatorStatusResult {
 }
 
 export class Admin {
-  constructor(private readonly client: Client) {}
+  /**
+   * Project transfer sub-namespace (v1.59+) — two-party SIWX-signed
+   * project handoff. Access via `r.admin.transfers.{initiate, preview,
+   * accept, cancel, listIncoming, listOutgoing}`.
+   */
+  readonly transfers: Transfers;
+
+  constructor(private readonly client: Client) {
+    this.transfers = new Transfers(client);
+  }
 
   /** Send a message to the Run402 developers. Requires an active tier. */
   async sendMessage(message: string): Promise<SendMessageResult> {

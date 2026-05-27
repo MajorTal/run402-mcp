@@ -637,6 +637,34 @@ Calling **`set_tier`** during grace reactivates the **account** inline and clear
 
 Operator moderation actions (independent of lifecycle, scoped to a single project): **`admin_archive_project`** and **`admin_reactivate_project`**.
 
+## Project transfer (v1.59, two-party handoff)
+
+A project can be transferred to a different wallet without redeploying. Both sides sign with their own wallet (SIWX). Owner-side mutations on the project freeze for the 72-hour pending window — the recipient sees exactly what they review.
+
+**Six tools**: **`initiate_project_transfer`** (owner-only), **`preview_project_transfer`**, **`accept_project_transfer`** (recipient), **`cancel_project_transfer`** (either party), **`list_incoming_transfers`**, **`list_outgoing_transfers`**.
+
+**Flow:**
+
+1. Owner runs **`initiate_project_transfer`** with `project_id`, `to_wallet`, optional `message`. Gateway creates a `pending` row with 72h expiry.
+2. Either party runs **`preview_project_transfer`** with the `transfer_id`. Preview shows custom domains, subdomains, function names, secret NAMES (values are NEVER returned), CI bindings to be revoked, and billing implications.
+3. Recipient runs **`accept_project_transfer`**. Atomic at accept: ownership flips, the previous owner's CI bindings on the project are revoked, both sides get notification emails, and the project carries a persistent `secrets_rotation_advised` advisory until every inherited secret is re-written.
+4. Either side can **`cancel_project_transfer`** at any time before accept. After 72h the gateway auto-expires the pending row.
+
+**Freeze invariant.** While `pending`, every owner-side mutation against the project (deploy, secret CRUD, function CRUD, custom-domain bind/unbind, scheduled-function changes, mailbox config, CI binding CRUD, project rename) returns **409 `PROJECT_HAS_PENDING_TRANSFER`** with `details.transfer_id` and a `next_actions[]` cancel route. Data-plane traffic keeps serving. Payment-path routes (tier renew, billing) keep working. The `cancel_project_transfer` route is intentionally unblocked so recovery is always possible.
+
+**What does NOT transfer:**
+
+- Tier lease stays with the original owner's billing account (no proration in Phase 1A).
+- KMS contract wallets (`provision_contract_wallet`) remain wallet-scoped, not project-scoped.
+- GitHub repository ownership — handle that out of band.
+- On-chain balance attached to any wallet — `to_wallet` does NOT gain access to `from_wallet`'s funds.
+
+**Billing policy.** Phase 1A supports only `migrate` (default): the project moves into the recipient's billing account. The recipient must already have an active billing account; if not, the accept returns `409 RECIPIENT_ACCOUNT_NOT_ACTIVE`.
+
+**Secrets rotation prompt.** After accept, `tier_status` surfaces `projects[].secrets_rotation_advised: { advised_at, reason }` for the transferred project. Use **`set_secret`** to rotate every inherited name; the advisory clears once every one has been re-written.
+
+`list_incoming_transfers` is also surfaced on the top-level `tier_status` response as `incoming_transfers[]` (each entry carries `preview_path`), so a single `tier_status` call shows pending offers without a separate fetch.
+
 ## Standard Workflow
 
 ```

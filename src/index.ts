@@ -97,6 +97,22 @@ import {
   handleAdminReactivateProject,
 } from "./tools/admin-reactivate-project.js";
 
+// v1.59 — two-party project transfer (Phase 1A)
+import {
+  acceptProjectTransferSchema,
+  cancelProjectTransferSchema,
+  handleAcceptProjectTransfer,
+  handleCancelProjectTransfer,
+  handleInitiateProjectTransfer,
+  handleListIncomingTransfers,
+  handleListOutgoingTransfers,
+  handlePreviewProjectTransfer,
+  initiateProjectTransferSchema,
+  listIncomingTransfersSchema,
+  listOutgoingTransfersSchema,
+  previewProjectTransferSchema,
+} from "./tools/transfers.js";
+
 // New tools — user role management
 import { promoteUserSchema, handlePromoteUser } from "./tools/promote-user.js";
 import { demoteUserSchema, handleDemoteUser } from "./tools/demote-user.js";
@@ -668,6 +684,50 @@ server.tool(
   "Operator un-archive — flips `projects.archived_at` back to NULL. In v1.57 this was narrowed: it no longer touches account-level lifecycle. To reactivate a grace-state account, subscribe a tier (`tier_set`) or enable lease-perpetual (`admin_set_lease_perpetual`). Platform-admin only. Calls POST /projects/v1/admin/:id/reactivate.",
   adminReactivateProjectSchema,
   async (args) => handleAdminReactivateProject(args),
+);
+
+// ─── Project transfer (v1.59, two-party SIWX handoff) ───────────────────────
+
+server.tool(
+  "initiate_project_transfer",
+  "Initiate a two-party project transfer (v1.59+). You must currently own the project (gateway verifies against fresh DB state). Creates a `pending` row with 72h expiry and freezes owner-side mutations on the project until accepted, cancelled, or expired. The recipient gets the project under the `migrate` billing policy (project moves into their billing account). Owner's tier lease is NOT refunded. GitHub repo ownership is NOT transferred. Calls POST /projects/v1/:project_id/transfers.",
+  initiateProjectTransferSchema,
+  async (args) => handleInitiateProjectTransfer(args),
+);
+
+server.tool(
+  "preview_project_transfer",
+  "Fetch the preview document for a project transfer (v1.59+). Returns the safe review payload: project name, custom domains, subdomains, function names, secret NAMES (values are never returned), CI bindings that will be revoked at accept, mailbox summary, billing implications. Caller must be either the from_wallet or the to_wallet. Calls GET /agent/v1/transfers/:transfer_id.",
+  previewProjectTransferSchema,
+  async (args) => handlePreviewProjectTransfer(args),
+);
+
+server.tool(
+  "accept_project_transfer",
+  "Accept an incoming project transfer (v1.59+). Your wallet must equal the transfer's to_wallet. The accept transaction atomically: (a) flips ownership to your wallet, (b) revokes the previous owner's CI bindings on the project, (c) enqueues notifications to both parties, (d) stamps a persistent `secrets_rotation_advised` advisory. Secret VALUES are inherited (rotation strongly advised via `set_secret` for each name). GitHub repo ownership is NOT part of the transfer. Calls POST /agent/v1/transfers/:transfer_id/accept.",
+  acceptProjectTransferSchema,
+  async (args) => handleAcceptProjectTransfer(args),
+);
+
+server.tool(
+  "cancel_project_transfer",
+  "Cancel a pending project transfer (v1.59+). Either party (from_wallet or to_wallet) may cancel. Already-accepted/cancelled/expired transfers return 409 TRANSFER_ALREADY_PROCESSED. Calls POST /agent/v1/transfers/:transfer_id/cancel.",
+  cancelProjectTransferSchema,
+  async (args) => handleCancelProjectTransfer(args),
+);
+
+server.tool(
+  "list_incoming_transfers",
+  "List pending project transfers OFFERED TO the authenticated wallet (v1.59+). Each entry carries `preview_path` for deep-linking into the preview tool. Calls GET /agent/v1/transfers/incoming.",
+  listIncomingTransfersSchema,
+  async (args) => handleListIncomingTransfers(args),
+);
+
+server.tool(
+  "list_outgoing_transfers",
+  "List pending project transfers INITIATED BY the authenticated wallet (v1.59+). Each entry carries `preview_path` for deep-linking into the preview tool. Calls GET /agent/v1/transfers/outgoing.",
+  listOutgoingTransfersSchema,
+  async (args) => handleListOutgoingTransfers(args),
 );
 
 server.tool(

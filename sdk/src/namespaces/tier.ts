@@ -17,6 +17,55 @@ export interface TierFunctionLimits {
   [key: string]: unknown;
 }
 
+/**
+ * Per-project summary returned in `TierStatusResult.projects[]`. Mirrors the
+ * gateway's `WalletTierInfo.projects[]` shape. Pre-v1.57 gateways may omit
+ * `effective_status` / `account_lifecycle_state` / `lease_perpetual`; pre-v1.59
+ * gateways omit `secrets_rotation_advised`. Unknown future fields are preserved
+ * via the index signature so callers can branch on them.
+ */
+export interface TierStatusProject {
+  id: string;
+  name: string;
+  tier: string;
+  status: string;
+  pinned: boolean;
+  created_at: string;
+  effective_status?: string;
+  account_lifecycle_state?: string;
+  lease_perpetual?: boolean;
+  /**
+   * v1.59 (add-project-transfer): set on a project after an accepted transfer
+   * stamped `projects.secrets_rotation_advised_at`. Clears automatically once
+   * B has re-written every previously-inherited secret name (or via the
+   * explicit acknowledge route). Surfaced so agents can guide rotation.
+   */
+  secrets_rotation_advised?: {
+    advised_at: string;
+    reason: string;
+  };
+  [key: string]: unknown;
+}
+
+/**
+ * v1.59 (add-project-transfer): summary of a pending transfer OFFERED TO the
+ * authenticated wallet. Exposed at the top level of `TierStatusResult` so the
+ * inbox is visible without a separate API call. Each entry carries
+ * `preview_path` for deep-linking into `GET /agent/v1/transfers/<id>`.
+ */
+export interface TierStatusIncomingTransfer {
+  transfer_id: string;
+  project_id: string;
+  project_name_snapshot: string | null;
+  from_wallet: string;
+  billing_policy: "migrate";
+  message: string | null;
+  initiated_at: string;
+  expires_at: string;
+  kysigned_record_id: string | null;
+  preview_path: string;
+}
+
 export interface TierStatusResult {
   wallet: string;
   tier: string | null;
@@ -47,6 +96,19 @@ export interface TierStatusResult {
     api_calls_limit: number;
     storage_bytes_limit: number;
   };
+  /**
+   * Per-project summary across all projects on the wallet's billing account.
+   * Always present on v1.46+ gateways. Pre-v1.59 entries lack
+   * `secrets_rotation_advised`.
+   */
+  projects?: TierStatusProject[];
+  /**
+   * v1.59 (add-project-transfer): pending transfers offered TO this wallet.
+   * Empty array when none. Absent on pre-v1.59 gateways. Each entry carries
+   * `preview_path` so callers can deep-link into the full preview document
+   * without a second list call.
+   */
+  incoming_transfers?: TierStatusIncomingTransfer[];
   /** Function authoring caps returned by newer gateways. Unknown future
    *  limit fields are preserved so callers can display or branch on them. */
   function_limits?: TierFunctionLimits;

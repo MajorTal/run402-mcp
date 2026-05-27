@@ -23,7 +23,8 @@ export type Run402ErrorKind =
   | "api_error"
   | "network_error"
   | "local_error"
-  | "deploy_error";
+  | "deploy_error"
+  | "transfer_freeze";
 
 /**
  * Quota-denial scope discriminator (v1.46+). Indicates whether a quota-related
@@ -356,6 +357,60 @@ export class Run402DeployError extends Run402Error {
   }
 }
 
+/**
+ * Project has a pending transfer (v1.59+). Gateway returns 409 with
+ * `code: "PROJECT_HAS_PENDING_TRANSFER"` from the transfer-freeze middleware
+ * mounted on owner-side mutations (deploy, secrets, custom domains, function
+ * CRUD, scheduled-function changes, mailbox config, CI bindings, project
+ * rename, etc.). The pending transfer must be accepted, cancelled, or
+ * allowed to expire (72h) before owner-side mutations resume.
+ *
+ * The error carries `transferId` (when the gateway resolved it) and
+ * `cancelPath` lifted from `next_actions[].path`, so callers can present an
+ * actionable resolution path. `previewPath` mirrors the view-transfer
+ * next_action when present.
+ */
+export class TransferFreezeError extends Run402Error {
+  static readonly DEFAULT_CODE = "PROJECT_HAS_PENDING_TRANSFER";
+  static readonly DEFAULT_CATEGORY = "validation";
+  static readonly DEFAULT_RETRYABLE = false;
+  readonly kind = "transfer_freeze" as const;
+  /** The pending transfer id when the gateway resolved one. */
+  readonly transferId: string | null;
+  /** API path to cancel the pending transfer (e.g. `/agent/v1/transfers/<id>/cancel`). */
+  readonly cancelPath: string | null;
+  /** API path to view the pending transfer preview. */
+  readonly previewPath: string | null;
+  readonly projectId: string | null;
+
+  constructor(message: string, status: number, body: unknown, context: string) {
+    super(message, status, body, context);
+    const envelope =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)
+        : null;
+    const details =
+      envelope && typeof envelope.details === "object" && envelope.details !== null
+        ? (envelope.details as Record<string, unknown>)
+        : null;
+    this.transferId = typeof details?.transfer_id === "string" ? (details.transfer_id as string) : null;
+    this.projectId = typeof details?.project_id === "string" ? (details.project_id as string) : null;
+    const actions = Array.isArray(envelope?.next_actions) ? (envelope?.next_actions as unknown[]) : [];
+    this.cancelPath = pickNextActionPath(actions, "cancel_transfer");
+    this.previewPath = pickNextActionPath(actions, "view_transfer");
+  }
+}
+
+function pickNextActionPath(actions: unknown[], type: string): string | null {
+  for (const a of actions) {
+    if (a && typeof a === "object" && !Array.isArray(a)) {
+      const obj = a as Record<string, unknown>;
+      if (obj.type === type && typeof obj.path === "string") return obj.path;
+    }
+  }
+  return null;
+}
+
 // ─── Type guards ─────────────────────────────────────────────────────────────
 //
 // Identity-free guards. Each one checks the structural brand and (for subclass
@@ -406,6 +461,11 @@ export function isLocalError(e: unknown): e is LocalError {
 /** True if `e` is a {@link Run402DeployError}. */
 export function isDeployError(e: unknown): e is Run402DeployError {
   return isRun402Error(e) && e.kind === "deploy_error";
+}
+
+/** True if `e` is a {@link TransferFreezeError}. */
+export function isTransferFreezeError(e: unknown): e is TransferFreezeError {
+  return isRun402Error(e) && e.kind === "transfer_freeze";
 }
 
 /**

@@ -847,6 +847,17 @@ Inside GitHub Actions, `deploy apply` automatically uses OIDC credentials when `
 
 `link github` requires a local allowance because it signs the delegation. The generated workflow does not require an allowance file or service key in GitHub; it uses GitHub's OIDC token with `id-token: write`. Use repeatable `--route-scope` only when CI should deploy route declarations; no scopes means no CI route authority.
 
+### transfer (v1.59, two-party project handoff)
+- `run402 transfer init --to <wallet> [--project <id>] [--billing-policy migrate] [--message <text>] [--kysigned <record_id>]` — initiate (owner-only). Returns `{ transfer_id, expires_at, project_summary, your_unused_lease_days, lease_refundable: false, terms_sha256 }`.
+- `run402 transfer preview <transfer_id>` — fetch the preview document (either party). Lists custom domains, subdomains, function names, secret NAMES (never values), CI bindings that will be revoked on accept, mailbox summary, billing implications.
+- `run402 transfer list [--incoming | --outgoing] [--limit N] [--offset N]` — `--incoming` (default) shows transfers OFFERED TO your wallet; `--outgoing` shows transfers you initiated. Each entry includes `preview_path`.
+- `run402 transfer accept <transfer_id>` — accept (recipient). Atomically flips ownership, revokes the previous owner's CI bindings on the project, and stamps a `secrets_rotation_advised` advisory. Secret VALUES are inherited; the response returns `secret_names_inherited[]`.
+- `run402 transfer cancel <transfer_id> [--reason <text>]` — cancel (either party).
+
+While a transfer is `pending` (72h TTL), owner-side mutations on the project return `409 PROJECT_HAS_PENDING_TRANSFER` with `details.transfer_id` and a `next_actions[]` cancel route. Data-plane (`/rest/v1/*`, function invocation, mailbox send/receive) keeps serving; payment-path routes (tier renew, billing) keep working; the `transfer cancel` route is intentionally unblocked so the owner can always recover. After accept, rotate every inherited secret with `run402 secrets set <project> <name> <value>` — the `secrets_rotation_advised` advisory on `tier status` clears once every previously-inherited name has been re-written.
+
+What does NOT transfer: tier lease (stays with the original owner's billing account; no Phase 1A proration), KMS contract wallets (wallet-scoped, not project-scoped), GitHub repo ownership (handle out of band), or on-chain balance on any wallet. Phase 1A supports only `--billing-policy migrate` — the project moves into the recipient's billing account; if they have no active billing account yet, accept returns `409 RECIPIENT_ACCOUNT_NOT_ACTIVE`.
+
 ### functions
 Node 22 runtime. Must export `default async (req: Request) => Response`.
 Built-in helper: `import { db, adminDb, email, ai, assets, getUser } from '@run402/functions'`

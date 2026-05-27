@@ -15,6 +15,7 @@ import {
   ApiError,
   NetworkError,
   PaymentRequired,
+  TransferFreezeError,
   Unauthorized,
 } from "./errors.js";
 import type { CredentialsProvider, ProjectKeys } from "./credentials.js";
@@ -138,6 +139,14 @@ export async function requestWithResponse<T>(
       context,
     );
   }
+  if (res.status === 409 && envelopeCode(resBody) === "PROJECT_HAS_PENDING_TRANSFER") {
+    throw new TransferFreezeError(
+      `${displayMessage(resBody, "Project has a pending transfer")} while ${context}`,
+      res.status,
+      resBody,
+      context,
+    );
+  }
 
   throw new ApiError(
     `${displayMessage(resBody, "API error")} while ${context} (HTTP ${res.status})`,
@@ -154,6 +163,12 @@ function displayMessage(body: unknown, fallback: string): string {
     if (typeof obj.error === "string" && obj.error.length > 0) return obj.error;
   }
   return fallback;
+}
+
+function envelopeCode(body: unknown): string | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const code = (body as Record<string, unknown>).code;
+  return typeof code === "string" ? code : null;
 }
 
 export function buildClient(kernel: KernelConfig): Client {

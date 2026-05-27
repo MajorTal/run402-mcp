@@ -61,7 +61,7 @@ function parseSubcommands(filePath: string): string[] {
 /** Parse CLI commands as "module:subcommand" pairs */
 function parseCliCommands(): string[] {
   const cmds: string[] = [];
-  for (const mod of ["admin", "allowance", "tier", "projects", "image", "storage", "assets", "cache", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci", "notifications", "webhook-secret"]) {
+  for (const mod of ["admin", "allowance", "tier", "projects", "image", "storage", "assets", "cache", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci", "transfer", "notifications", "webhook-secret"]) {
     for (const sub of parseSubcommands(join(__dirname, "cli/lib", `${mod}.mjs`))) {
       cmds.push(`${mod}:${sub}`);
     }
@@ -80,7 +80,7 @@ function parseCliCommands(): string[] {
 /** Parse OpenClaw commands as "module:subcommand" pairs */
 function parseOpenClawCommands(): string[] {
   const cmds: string[] = [];
-  for (const mod of ["admin", "allowance", "tier", "projects", "image", "storage", "assets", "cache", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci", "notifications", "webhook-secret"]) {
+  for (const mod of ["admin", "allowance", "tier", "projects", "image", "storage", "assets", "cache", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci", "transfer", "notifications", "webhook-secret"]) {
     for (const sub of parseSubcommands(join(__dirname, "openclaw/scripts", `${mod}.mjs`))) {
       cmds.push(`${mod}:${sub}`);
     }
@@ -327,6 +327,14 @@ const SURFACE: Capability[] = [
   { id: "demote_user",     endpoint: "POST /projects/v1/admin/:id/demote-user",  mcp: "demote_user",  cli: "projects:demote-user",  openclaw: "projects:demote-user" },
   { id: "admin_project_finance", endpoint: "GET /admin/api/finance/project/:id", mcp: null, cli: "projects:costs", openclaw: "projects:costs" },
 
+  // ── Project transfer (v1.59, two-party SIWX handoff) ──────────────────
+  { id: "initiate_project_transfer", endpoint: "POST /projects/v1/:project_id/transfers",       mcp: "initiate_project_transfer", cli: "transfer:init",    openclaw: "transfer:init" },
+  { id: "preview_project_transfer",  endpoint: "GET /agent/v1/transfers/:transfer_id",          mcp: "preview_project_transfer",  cli: "transfer:preview", openclaw: "transfer:preview" },
+  { id: "accept_project_transfer",   endpoint: "POST /agent/v1/transfers/:transfer_id/accept",  mcp: "accept_project_transfer",   cli: "transfer:accept",  openclaw: "transfer:accept" },
+  { id: "cancel_project_transfer",   endpoint: "POST /agent/v1/transfers/:transfer_id/cancel",  mcp: "cancel_project_transfer",   cli: "transfer:cancel",  openclaw: "transfer:cancel" },
+  { id: "list_incoming_transfers",   endpoint: "GET /agent/v1/transfers/incoming",              mcp: "list_incoming_transfers",   cli: "transfer:list",    openclaw: "transfer:list" },
+  { id: "list_outgoing_transfers",   endpoint: "GET /agent/v1/transfers/outgoing",              mcp: "list_outgoing_transfers",   cli: null,               openclaw: null },
+
   // ── Auth (project user) ────────────────────────────────────────────────
   { id: "request_magic_link", endpoint: "POST /auth/v1/magic-link",           mcp: "request_magic_link", cli: "auth:magic-link",    openclaw: "auth:magic-link" },
   { id: "verify_magic_link",  endpoint: "POST /auth/v1/token?grant_type=magic_link", mcp: "verify_magic_link", cli: "auth:verify", openclaw: "auth:verify" },
@@ -554,6 +562,14 @@ const SDK_BY_CAPABILITY: Record<string, string | null> = {
   promote_user: "auth.promote",
   demote_user: "auth.demote",
   admin_project_finance: "admin.getProjectFinance",
+
+  // Project transfer (v1.59) — sub-namespace lives on admin.transfers
+  initiate_project_transfer: "admin.transfers.initiate",
+  preview_project_transfer: "admin.transfers.preview",
+  accept_project_transfer: "admin.transfers.accept",
+  cancel_project_transfer: "admin.transfers.cancel",
+  list_incoming_transfers: "admin.transfers.listIncoming",
+  list_outgoing_transfers: "admin.transfers.listOutgoing",
 
   // Auth
   request_magic_link: "auth.requestMagicLink",

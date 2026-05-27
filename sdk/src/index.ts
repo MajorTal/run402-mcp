@@ -238,6 +238,7 @@ export {
   NetworkError,
   LocalError,
   Run402DeployError,
+  TransferFreezeError,
   isRun402Error,
   isPaymentRequired,
   isProjectNotFound,
@@ -246,6 +247,7 @@ export {
   isNetworkError,
   isLocalError,
   isDeployError,
+  isTransferFreezeError,
   isRetryableRun402Error,
   getQuotaScope,
 } from "./errors.js";
@@ -296,6 +298,8 @@ export {
 } from "./namespaces/ci.js";
 export { ScopedRun402 } from "./scoped.js";
 export type * from "./namespaces/admin.js";
+export type * from "./namespaces/transfers.js";
+export { Transfers } from "./namespaces/transfers.js";
 export type * from "./namespaces/ai.js";
 export type * from "./namespaces/allowance.js";
 export type * from "./namespaces/apps.js";
