@@ -27,7 +27,6 @@ Subcommands:
   validate-expose [id] --file <path>      Validate a manifest file without mutating the project
   get-expose   [id]                       Get the current authorization manifest
   delete [id] --confirm                   Immediately and irreversibly delete a project (cascade purge) and remove from local state. Requires --confirm.
-  pin   [id]                              Pin a project (admin only; uses admin allowance wallet)
   promote-user [id] <email>               Promote a user to project_admin role
   demote-user  [id] <email>               Demote a user from project_admin role
 
@@ -506,22 +505,6 @@ async function use(projectId) {
   }
 }
 
-async function pin(projectId) {
-  if (!projectId) {
-    fail({
-      code: "BAD_USAGE",
-      message: "Missing <project_id>.",
-      hint: "run402 projects pin <project_id>",
-    });
-  }
-  try {
-    const data = await getSdk().projects.pin(projectId);
-    console.log(JSON.stringify(data, null, 2));
-  } catch (err) {
-    reportSdkError(err);
-  }
-}
-
 async function promoteUser(projectId, email) {
   if (!email) {
     fail({
@@ -593,6 +576,15 @@ export async function run(sub, args) {
     console.log(HELP);
     process.exit(0);
   }
+  // v1.57: `projects pin` was removed. Surface a specific hint pointing at the
+  // replacement before falling through to the unknown-subcommand handler.
+  if (sub === "pin") {
+    fail({
+      code: "REMOVED_COMMAND",
+      message: "`run402 projects pin` was removed in v1.57.",
+      hint: "Per-project pin is superseded by the account-level escape hatch. Use `run402 admin lease-perpetual <billing_account_id> --enable` (platform-admin only).",
+    });
+  }
   args = normalizeArgv(args);
   if (Array.isArray(args) && hasHelp(args)) {
     console.log(SUB_HELP[sub] || HELP);
@@ -615,7 +607,6 @@ export async function run(sub, args) {
     case "validate-expose": await validateExpose(args); break;
     case "get-expose":   { const { projectId } = resolvePositionalProject(args, { rejectBareFirst: true }); await getExpose(projectId); break; }
     case "delete":    { const { projectId, rest } = resolvePositionalProject(args, { rejectBareFirst: true }); await deleteProject(projectId, rest); break; }
-    case "pin":       { const { projectId } = resolvePositionalProject(args, { rejectBareFirst: true }); await pin(projectId); break; }
     case "promote-user": { const { projectId, rest } = resolvePositionalProject(args); await promoteUser(projectId, rest[0]); break; }
     case "demote-user":  { const { projectId, rest } = resolvePositionalProject(args); await demoteUser(projectId, rest[0]); break; }
     default:

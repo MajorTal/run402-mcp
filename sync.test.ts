@@ -61,7 +61,7 @@ function parseSubcommands(filePath: string): string[] {
 /** Parse CLI commands as "module:subcommand" pairs */
 function parseCliCommands(): string[] {
   const cmds: string[] = [];
-  for (const mod of ["allowance", "tier", "projects", "image", "storage", "assets", "cache", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci", "notifications", "webhook-secret"]) {
+  for (const mod of ["admin", "allowance", "tier", "projects", "image", "storage", "assets", "cache", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci", "notifications", "webhook-secret"]) {
     for (const sub of parseSubcommands(join(__dirname, "cli/lib", `${mod}.mjs`))) {
       cmds.push(`${mod}:${sub}`);
     }
@@ -80,7 +80,7 @@ function parseCliCommands(): string[] {
 /** Parse OpenClaw commands as "module:subcommand" pairs */
 function parseOpenClawCommands(): string[] {
   const cmds: string[] = [];
-  for (const mod of ["allowance", "tier", "projects", "image", "storage", "assets", "cache", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci", "notifications", "webhook-secret"]) {
+  for (const mod of ["admin", "allowance", "tier", "projects", "image", "storage", "assets", "cache", "cdn", "functions", "secrets", "jobs", "sites", "subdomains", "domains", "apps", "email", "message", "agent", "ai", "auth", "sender-domain", "billing", "contracts", "webhooks", "service", "deploy", "ci", "notifications", "webhook-secret"]) {
     for (const sub of parseSubcommands(join(__dirname, "openclaw/scripts", `${mod}.mjs`))) {
       cmds.push(`${mod}:${sub}`);
     }
@@ -316,7 +316,12 @@ const SURFACE: Capability[] = [
   { id: "get_app",           endpoint: "GET /apps/v1/:version_id",          mcp: "get_app",             cli: "apps:inspect",     openclaw: "apps:inspect" },
 
   // ── Admin ──────────────────────────────────────────────────────────────
-  { id: "pin_project",     endpoint: "POST /projects/v1/admin/:id/pin",    mcp: "pin_project",      cli: "projects:pin",     openclaw: "projects:pin" },
+  // v1.57: pin/unpin endpoints removed. Per-project pin is superseded by the
+  // account-level escape hatch (admin_set_lease_perpetual). archive and
+  // reactivate are operator moderation actions, scoped to a single project.
+  { id: "admin_set_lease_perpetual", endpoint: "POST /billing-accounts/v1/admin/:id/lease-perpetual", mcp: "admin_set_lease_perpetual", cli: "admin:lease-perpetual", openclaw: "admin:lease-perpetual" },
+  { id: "admin_archive_project",     endpoint: "POST /projects/v1/admin/:id/archive",                 mcp: "admin_archive_project",     cli: "admin:archive",          openclaw: "admin:archive" },
+  { id: "admin_reactivate_project",  endpoint: "POST /projects/v1/admin/:id/reactivate",              mcp: "admin_reactivate_project",  cli: "admin:reactivate",       openclaw: "admin:reactivate" },
   { id: "promote_user",    endpoint: "POST /projects/v1/admin/:id/promote-user", mcp: "promote_user", cli: "projects:promote-user", openclaw: "projects:promote-user" },
   { id: "demote_user",     endpoint: "POST /projects/v1/admin/:id/demote-user",  mcp: "demote_user",  cli: "projects:demote-user",  openclaw: "projects:demote-user" },
   { id: "admin_project_finance", endpoint: "GET /admin/api/finance/project/:id", mcp: null, cli: "projects:costs", openclaw: "projects:costs" },
@@ -540,8 +545,10 @@ const SDK_BY_CAPABILITY: Record<string, string | null> = {
   rotate_webhook_secret: "admin.rotateWebhookSecret",
   start_operator_passkey_enrollment: "admin.startOperatorPasskeyEnrollment",
 
-  // Admin
-  pin_project: "projects.pin",
+  // Admin (v1.57)
+  admin_set_lease_perpetual: "admin.setLeasePerpetual",
+  admin_archive_project: "admin.archiveProject",
+  admin_reactivate_project: "admin.reactivateProject",
   promote_user: "auth.promote",
   demote_user: "auth.demote",
   admin_project_finance: "admin.getProjectFinance",

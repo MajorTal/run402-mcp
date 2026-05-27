@@ -25,6 +25,7 @@ Commands:
   allowance   Manage your agent allowance (create, fund, balance, status)
   tier        Manage tier subscription (status, set)
   projects    Manage projects (provision, list, query, inspect, delete)
+  admin       Platform-admin operations (lease-perpetual, archive, reactivate)
   deploy      Unified deploy operations (requires active tier)
   ci          Link GitHub Actions OIDC deploy bindings
   jobs        Submit and inspect fixed platform-managed jobs
@@ -122,6 +123,11 @@ switch (cmd) {
   }
   case "projects": {
     const { run } = await import("./lib/projects.mjs");
+    await run(sub, rest);
+    break;
+  }
+  case "admin": {
+    const { run } = await import("./lib/admin.mjs");
     await run(sub, rest);
     break;
   }

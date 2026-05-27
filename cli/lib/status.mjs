@@ -113,6 +113,11 @@ export async function run(args = []) {
     tier: tier && tier.tier
       ? { name: tier.tier, status: tier.status, expires: tier.lease_expires_at }
       : null,
+    // v1.57: lifecycle state and the per-account escape hatch moved to the
+    // billing account. Surface them at the top level so agents don't have to
+    // dig into the projects array to read them.
+    account_lifecycle_state: tier?.account_lifecycle_state ?? null,
+    lease_perpetual: tier?.lease_perpetual ?? null,
     // GH-32: `balance` used to mean the billing-account balance, which
     // confused people who expected their on-chain wallet balance. Split into
     // two unambiguous fields:

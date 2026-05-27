@@ -610,7 +610,6 @@ restResponse<T = unknown>(id: string, table: string, queryOrOptions?: string | P
 validateExpose(manifest: ExposeManifest | string, opts?: { project?: string; project_id?: string; migrationSql?: string }): Promise<ExposeManifestValidationResult>
 applyExpose(id: string, manifest: ExposeManifest): Promise<unknown>
 getExpose(id: string): Promise<ExposeManifest>
-pin(id: string): Promise<PinResult>
 getQuote(): Promise<QuoteResult>
 info(id: string): Promise<ProjectInfo>
 keys(id: string): Promise<ProjectKeys>
@@ -624,6 +623,16 @@ quote(): Promise<QuoteResult> // alias of getQuote
 promoteUser(id, email): Promise<void> // project-admin role helper
 demoteUser(id, email): Promise<void>
 ```
+
+**v1.57 lifecycle fields on `ProjectSummary` / `UsageReport`.** Gateway v1.57 moved the lifecycle state machine from `internal.projects` to `internal.billing_accounts`. Each `list()` entry and the `getUsage()` envelope expose:
+
+- `effective_status: EffectiveProjectStatus` — `"active" | "past_due" | "frozen" | "dormant" | "archived" | "deleted"`. Derived: `deleted_at` → `"deleted"`; `archived_at` → `"archived"`; otherwise the account's lifecycle state. Use this for serving / UX.
+- `account_lifecycle_state: BillingAccountLifecycleState` — `"active" | "past_due" | "frozen" | "dormant" | "purged"`. The raw per-account state; identical across every project on the same billing account.
+- `lease_perpetual: boolean` (list only) — operator escape hatch flag. When `true`, the account never advances past `active`. Replaces the v1.56 per-project `pinned`.
+- `deleted_at: string | null` (list only) — ISO timestamp when the user deleted this project.
+- `archived_at: string | null` (list only) — ISO timestamp when an operator archived this project.
+
+The v1.56 `status` and `pinned` fields are no longer part of the typed SDK surface. The gateway still emits them as wire mirrors during the one-release v1.57 compat window; the next gateway version drops them entirely. The v1.56 `projects.pin(id)` SDK method was removed alongside the endpoint — use `r.admin.setLeasePerpetual(ba_id, true)`.
 
 ### `r.project(id).apply` (mutations) + `r.project(id).deploy` (observability)
 
@@ -1073,6 +1082,13 @@ just the requesting wallet. Use the returned `pool_usage` as the authoritative q
 enforcement view; per-project `r.projects.getUsage(id)` reports the same account-level
 caps alongside that project's slice of the pool.
 
+**v1.57:** `TierStatusResult` also surfaces two optional billing-account fields:
+
+- `account_lifecycle_state?: "active" | "past_due" | "frozen" | "dormant" | "purged"` — mirror of the owning billing account's lifecycle state. Identical to the per-project `account_lifecycle_state` on every `list()` entry.
+- `lease_perpetual?: boolean` — operator escape hatch flag. When `true`, the account never advances past `active`.
+
+Both are optional because older gateways do not return them at the top level.
+
 `set` auto-detects subscribe / renew / upgrade / downgrade based on current state.
 For tier pricing, call `r.projects.getQuote()` (the SDK does not expose a separate
 `tier.quote()` method).
@@ -1258,6 +1274,11 @@ getProjectFinance(id: string, opts?: {
   window?: "24h" | "7d" | "30d" | "90d",
   cookie?: string
 }): Promise<AdminProjectFinanceResult>
+
+// v1.57 — operator-only project + billing-account actions
+setLeasePerpetual(billingAccountId: string, perpetual: boolean): Promise<SetLeasePerpetualResult>
+archiveProject(projectId: string, opts?: { reason?: string }): Promise<ArchiveProjectResult>
+reactivateProject(projectId: string): Promise<ReactivateProjectResult>
 ```
 
 `AgentContactResult` includes `email_verification_status`, `passkey_binding_status`, `assurance_level`, proof timestamps, and cooldown fields. Assurance labels are `wallet_only`, `email_pending`, `email_verified`, `passkey_pending`, and `operator_passkey`; they describe mailbox/passkey continuity, not a humanhood or uniqueness claim. `startOperatorPasskeyEnrollment()` requires `email_verified` and emails the token to the verified contact email instead of returning it.
@@ -1266,6 +1287,20 @@ getProjectFinance(id: string, opts?: {
 platform-admin gated; a project `service_key` is not enough. In Node operator
 scripts, use an admin allowance wallet or pass
 `cookie: process.env.RUN402_ADMIN_COOKIE` for browser-session auth.
+
+**v1.57 — operator-only project + billing-account actions.** Gateway v1.57 moved the lifecycle state machine from `internal.projects` to `internal.billing_accounts` and dropped the per-project `pin` / `unpin` endpoints. The replacements:
+
+- `setLeasePerpetual(billingAccountId, perpetual)` — toggle the account-level escape hatch. When `lease_perpetual` is `true`, the account never advances past `active` regardless of lease expiry; every project on the account is pinned. Enabling on a grace-state account (`past_due` / `frozen` / `dormant`) reactivates inline — the response carries `reactivated: true`. This replaces the v1.56 `projects.pin(id)` method (removed in v2.x SDK).
+- `archiveProject(projectId, { reason? })` — operator moderation. Sets `projects.archived_at = NOW()` on a single project; sibling projects on the same account keep serving. No-op when already archived (returns `note: "already archived"`).
+- `reactivateProject(projectId)` — un-archive a project (flips `archived_at` back to NULL). In v1.57 this was narrowed: it does NOT touch account-level lifecycle. To reactivate a grace-state account, either call `r.tier.set(tier)` (the tier flow runs the lifecycle advance inline) or `r.admin.setLeasePerpetual(ba_id, true)`.
+
+All three require platform-admin auth. Result envelopes:
+
+```
+SetLeasePerpetualResult: { status, billing_account_id, lease_perpetual, reactivated }
+ArchiveProjectResult:    { status, project_id, archived_at?, reason?, note? }   // note: "already archived"
+ReactivateProjectResult: { status, project_id, reactivated?: true, note? }      // note: "not archived"
+```
 
 ## Resource limits
 

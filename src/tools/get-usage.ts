@@ -33,8 +33,9 @@ export async function handleGetUsage(args: {
       `| Field | Value |`,
       `|-------|-------|`,
       `| account tier | ${body.tier} |`,
-      `| status | ${body.status} |`,
-      `| expires | ${body.lease_expires_at} |`,
+      `| effective status | ${body.effective_status} |`,
+      `| account lifecycle | ${body.account_lifecycle_state} |`,
+      `| expires | ${body.lease_expires_at ?? "—"} |`,
     ];
 
     return { content: [{ type: "text", text: lines.join("\n") }] };

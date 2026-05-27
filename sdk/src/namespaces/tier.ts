@@ -23,6 +23,23 @@ export interface TierStatusResult {
   lease_started_at: string | null;
   lease_expires_at: string | null;
   active: boolean;
+  /**
+   * Lifecycle state of the owning billing account (gateway v1.57+). Optional
+   * — older gateways do not return it at the top level. When present, this
+   * mirrors the same field on each `projects[]` entry.
+   */
+  account_lifecycle_state?:
+    | "active"
+    | "past_due"
+    | "frozen"
+    | "dormant"
+    | "purged";
+  /**
+   * Operator escape hatch flag on the owning billing account (v1.57+). When
+   * `true`, the account never advances past `active` regardless of lease
+   * expiry. Optional — older gateways do not return it.
+   */
+  lease_perpetual?: boolean;
   pool_usage: {
     projects: number;
     total_api_calls: number;

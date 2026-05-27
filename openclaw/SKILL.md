@@ -843,7 +843,7 @@ Project-level rate limit: 100 req/sec. Exceeding returns 429 with `retry_after`.
 
 ## Project lifecycle (~104-day soft delete)
 
-After lease expires, projects go through a state machine. The live data plane keeps serving the whole time — only the owner's control plane gets gated:
+Gateway v1.57 moved the lifecycle state machine from `internal.projects` to `internal.billing_accounts`. The grace clock now ticks per **account**, not per project — every project on the same billing account inherits the same `account_lifecycle_state`. The live data plane keeps serving the whole time; only the owner's control plane gets gated:
 
 | State | When | What happens |
 |---|---|---|
@@ -851,9 +851,15 @@ After lease expires, projects go through a state machine. The live data plane ke
 | `past_due` | day 0 | Site, REST, email keep serving. Owner gets first email. |
 | `frozen` | +14d | Control plane (deploys, secrets, subdomain claims, function upload) returns 402 with `lifecycle_state` / `entered_state_at` / `next_transition_at`. Site still serves. Subdomain reserved so the brand can't be claimed by another wallet. |
 | `dormant` | +44d | Scheduled (cron) functions pause. |
-| `purged` | +104d | Cascade: schema dropped, Lambdas deleted, mailbox tombstoned. Subdomain becomes claimable 14 days later. |
+| `purged` | +104d | Cascade: schemas dropped, Lambdas deleted, mailboxes tombstoned. Subdomains become claimable 14 days later. |
 
-`run402 tier set …` at any point during grace reactivates the project and clears all timers in one transaction. Pinned projects bypass the state machine entirely.
+`run402 tier set …` at any point during grace reactivates the account inline and clears every project's timers in one transaction. Each project entry also exposes:
+
+- `effective_status` — derived state for serving (`active` / `past_due` / `frozen` / `dormant` / `archived` / `deleted`). Use this for UX. When a single project is moderate-archived (`archived_at` set) or user-deleted (`deleted_at` set) it overrides the account lifecycle in this field.
+- `account_lifecycle_state` — the raw per-account state. Identical across every project on the same account.
+- `lease_perpetual` — operator escape hatch flag. When `true`, the account never advances past `active`. Replaces the v1.56 per-project `pinned`. Toggle via `run402 admin lease-perpetual <ba_id> --enable | --disable` (platform-admin only).
+
+Operator moderation actions (independent of lifecycle): `run402 admin archive <project_id> [--reason "..."]` sets `archived_at`; `run402 admin reactivate <project_id>` flips it back. Both are scoped to a single project — siblings on the same account keep serving.
 
 ## Image generation
 
@@ -1002,7 +1008,7 @@ Other allowance options:
 |---|---|
 | `402 payment_required` on `tier set` | Allowance is empty. `run402 allowance fund` (testnet) or fund with real USDC. |
 | `402` with `lifecycle_state: frozen` | Project past lease + 14 days. `run402 tier set <tier>` reactivates instantly. |
-| `403 admin_required` | Tool is admin-only (e.g., `pin_project`). Use a platform admin allowance wallet; project owners can't pin. |
+| `403 admin_required` | Subcommand is platform-admin only (e.g., `run402 admin lease-perpetual`, `run402 admin archive`, `run402 admin reactivate`). Use a platform admin allowance wallet; project owners can't toggle these. |
 | Empty `[]` from `/rest/v1/items` for anon | Table not in manifest with `expose: true`. Run `run402 projects apply-expose`. |
 | `403 forbidden_function` calling an RPC | Function's not in the manifest's `rpcs[]`. Add `{ name, signature, grant_to: ["authenticated"] }`. |
 | `409 reserved` on subdomain claim | Original owner's grace period — subdomain held until +118 days from lease expiry. |

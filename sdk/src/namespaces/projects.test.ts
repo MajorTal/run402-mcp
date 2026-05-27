@@ -322,6 +322,10 @@ describe("projects.list", () => {
 
   it("accepts items where lease_expires_at is missing (gateway omits it; type is optional)", async () => {
     // Mirrors the live gateway shape — list items don't include lease_expires_at.
+    // v1.57 shape: effective_status / account_lifecycle_state / lease_perpetual
+    // / deleted_at / archived_at on each entry; legacy status / pinned mirrors
+    // are still on the wire during the one-release compat window but are not
+    // part of the typed SDK surface.
     const { fetch } = mockFetch(() =>
       jsonResponse({
         wallet: WALLET_LOWER,
@@ -330,7 +334,11 @@ describe("projects.list", () => {
             id: "prj_1777563179844_1095",
             name: "kychon-port-olddominionboatclub-com",
             tier: "prototype",
-            status: "active",
+            effective_status: "active",
+            account_lifecycle_state: "active",
+            lease_perpetual: false,
+            deleted_at: null,
+            archived_at: null,
             api_calls: 212,
             storage_bytes: 12376062,
             created_at: "2026-04-30T15:32:59.891Z",
@@ -345,15 +353,68 @@ describe("projects.list", () => {
     const item = result.projects[0]!;
     assert.equal(item.id, "prj_1777563179844_1095");
     assert.equal(item.tier, "prototype");
+    assert.equal(item.effective_status, "active");
+    assert.equal(item.account_lifecycle_state, "active");
+    assert.equal(item.lease_perpetual, false);
+    assert.equal(item.deleted_at, null);
+    assert.equal(item.archived_at, null);
     assert.equal(item.lease_expires_at, undefined,
       "gateway omits lease_expires_at on list items; type is optional");
+  });
+
+  it("surfaces v1.57 grace-state fields when a billing account is past_due", async () => {
+    // Past-due account: every project inherits account_lifecycle_state = past_due.
+    // effective_status mirrors that until a per-project archived_at / deleted_at
+    // overrides it.
+    const { fetch } = mockFetch(() =>
+      jsonResponse({
+        wallet: WALLET_LOWER,
+        projects: [
+          {
+            id: "prj_active",
+            name: "still-live",
+            tier: "hobby",
+            effective_status: "past_due",
+            account_lifecycle_state: "past_due",
+            lease_perpetual: false,
+            deleted_at: null,
+            archived_at: null,
+            api_calls: 0,
+            storage_bytes: 0,
+            created_at: "2026-04-30T15:32:59.891Z",
+          },
+          {
+            id: "prj_moderated",
+            name: "archived-by-ops",
+            tier: "hobby",
+            effective_status: "archived",
+            account_lifecycle_state: "past_due",
+            lease_perpetual: false,
+            deleted_at: null,
+            archived_at: "2026-05-01T00:00:00.000Z",
+            api_calls: 0,
+            storage_bytes: 0,
+            created_at: "2026-04-30T15:32:59.891Z",
+          },
+        ],
+      }),
+    );
+    const sdk = makeSdk(makeCreds(), fetch);
+    const result = await sdk.projects.list(WALLET_LOWER);
+
+    assert.equal(result.projects[0]!.effective_status, "past_due");
+    assert.equal(result.projects[1]!.effective_status, "archived",
+      "archived_at on the project overrides the account lifecycle in effective_status");
+    assert.equal(result.projects[1]!.account_lifecycle_state, "past_due",
+      "account_lifecycle_state is per-account, identical across all projects");
   });
 });
 
 describe("projects.getUsage", () => {
   it("GETs /projects/v1/admin/:id/usage with service key", async () => {
     // Mirrors the live gateway shape — `lease_expires_at` is intentionally
-    // absent because the endpoint doesn't compute it (see GH-163).
+    // absent because the endpoint doesn't compute it (see GH-163). v1.57:
+    // effective_status / account_lifecycle_state replace the legacy `status`.
     const { fetch, calls } = mockFetch(() =>
       jsonResponse({
         project_id: "prj_known",
@@ -362,7 +423,8 @@ describe("projects.getUsage", () => {
         api_calls_limit: 1000,
         storage_bytes: 1024,
         storage_limit_bytes: 1048576,
-        status: "active",
+        effective_status: "active",
+        account_lifecycle_state: "active",
       }),
     );
     const sdk = makeSdk(makeCreds(), fetch);
@@ -372,6 +434,8 @@ describe("projects.getUsage", () => {
     assert.equal(calls[0]!.headers["Authorization"], "Bearer service_xxx");
     assert.equal(result.tier, "prototype");
     assert.equal(result.api_calls, 10);
+    assert.equal(result.effective_status, "active");
+    assert.equal(result.account_lifecycle_state, "active");
     assert.equal(result.lease_expires_at, undefined,
       "gateway omits lease_expires_at; type is optional so callers don't read a non-existent string");
   });
@@ -409,27 +473,6 @@ describe("projects.getSchema", () => {
     assert.equal(result.schema, "tenant_42");
     assert.equal(result.tables.length, 1);
     assert.equal(result.tables[0]!.name, "users");
-  });
-});
-
-describe("projects.pin", () => {
-  it("POSTs /projects/v1/admin/:id/pin with admin-wallet auth, not service key auth", async () => {
-    const { fetch, calls } = mockFetch(() =>
-      jsonResponse({ status: "pinned", project_id: "prj_external" }),
-    );
-    const sdk = makeSdk(makeCreds({
-      async getProject() {
-        return null;
-      },
-    }), fetch);
-    const result = await sdk.projects.pin("prj_external");
-
-    assert.equal(calls[0]!.url, "https://api.example.test/projects/v1/admin/prj_external/pin");
-    assert.equal(calls[0]!.method, "POST");
-    assert.equal(calls[0]!.headers["SIGN-IN-WITH-X"], "test-siwx");
-    assert.equal(calls[0]!.headers.Authorization, undefined);
-    assert.equal(calls[0]!.headers["X-Admin-Mode"], "1");
-    assert.equal(result.status, "pinned");
   });
 });
 

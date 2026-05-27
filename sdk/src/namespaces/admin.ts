@@ -164,6 +164,49 @@ export interface RotateWebhookSecretResult {
   note: string;
 }
 
+// ---------------------------------------------------------------------------
+// Operator-only project + billing-account actions (v1.57,
+// lifecycle-state-on-billing-account).
+// ---------------------------------------------------------------------------
+
+export interface SetLeasePerpetualResult {
+  status: "ok";
+  billing_account_id: string;
+  lease_perpetual: boolean;
+  /**
+   * `true` when the toggle was `lease_perpetual: true` AND the account was in
+   * a grace state (past_due / frozen / dormant) and got pulled back to
+   * `active` inline. `false` otherwise (account was already active, or the
+   * toggle disabled perpetual).
+   */
+  reactivated: boolean;
+}
+
+export interface ArchiveProjectOptions {
+  /** Free-text moderation reason recorded in the audit log. */
+  reason?: string;
+}
+
+export interface ArchiveProjectResult {
+  status: "ok";
+  project_id: string;
+  /** ISO timestamp of the archive action. Absent when the project was already archived. */
+  archived_at?: string;
+  /** Echoes the moderator-supplied reason when the project was newly archived. */
+  reason?: string;
+  /** Set when the project was already archived; archived_at is then omitted. */
+  note?: "already archived";
+}
+
+export interface ReactivateProjectResult {
+  status: "ok";
+  project_id: string;
+  /** `true` when the call un-archived a previously archived project. */
+  reactivated?: true;
+  /** Set when the project was not archived to begin with — the call is a no-op. */
+  note?: "not archived";
+}
+
 export interface OperatorStatusResult {
   operator_contact: {
     email_status: "none" | "pending" | "verified" | "bouncing";
@@ -351,6 +394,79 @@ export class Admin {
       {
         headers,
         context: "fetching project finance",
+      },
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Operator-only project + billing-account actions (v1.57).
+  // -------------------------------------------------------------------------
+
+  /**
+   * Toggle a billing account's `lease_perpetual` flag — the operator escape
+   * hatch that pins every project on the account (replaces the v1.56
+   * per-project `pin` removed in v1.57). When enabling on an account in a
+   * grace state, the gateway reactivates inline and reports it via
+   * `reactivated: true`.
+   *
+   * Platform-admin only. Calls
+   * `POST /billing-accounts/v1/admin/:id/lease-perpetual`.
+   */
+  async setLeasePerpetual(
+    billingAccountId: string,
+    perpetual: boolean,
+  ): Promise<SetLeasePerpetualResult> {
+    return this.client.request<SetLeasePerpetualResult>(
+      `/billing-accounts/v1/admin/${encodeURIComponent(billingAccountId)}/lease-perpetual`,
+      {
+        method: "POST",
+        headers: { "X-Admin-Mode": "1" },
+        body: { lease_perpetual: perpetual },
+        context: "setting billing account lease_perpetual",
+      },
+    );
+  }
+
+  /**
+   * Operator moderation action — archive a single project (ToS / abuse).
+   * Sets `projects.archived_at` to NOW(). Independent of account-level
+   * lifecycle; the rest of the account's projects continue serving.
+   *
+   * Platform-admin only. Calls `POST /projects/v1/admin/:id/archive`.
+   */
+  async archiveProject(
+    projectId: string,
+    opts: ArchiveProjectOptions = {},
+  ): Promise<ArchiveProjectResult> {
+    const body: Record<string, string> = {};
+    if (opts.reason !== undefined) body.reason = opts.reason;
+    return this.client.request<ArchiveProjectResult>(
+      `/projects/v1/admin/${encodeURIComponent(projectId)}/archive`,
+      {
+        method: "POST",
+        headers: { "X-Admin-Mode": "1" },
+        body,
+        context: "archiving project",
+      },
+    );
+  }
+
+  /**
+   * Operator "un-archive" — flips `projects.archived_at` back to NULL. In
+   * v1.57 this route was narrowed: it no longer touches account-level
+   * lifecycle. To reactivate a grace-state account, either subscribe a new
+   * tier (the tier flow runs `advanceLifecycleForAccount` inline) or set
+   * `lease_perpetual: true` via {@link setLeasePerpetual}.
+   *
+   * Platform-admin only. Calls `POST /projects/v1/admin/:id/reactivate`.
+   */
+  async reactivateProject(projectId: string): Promise<ReactivateProjectResult> {
+    return this.client.request<ReactivateProjectResult>(
+      `/projects/v1/admin/${encodeURIComponent(projectId)}/reactivate`,
+      {
+        method: "POST",
+        headers: { "X-Admin-Mode": "1" },
+        context: "reactivating project",
       },
     );
   }

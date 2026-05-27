@@ -57,9 +57,13 @@ const MATRIX = {
   projects: {
     shared: [
       "quote", "use", "list", "info", "keys", "rest",
-      "usage", "schema", "rls", "delete", "pin", "promote-user", "demote-user",
+      "usage", "schema", "rls", "delete", "promote-user", "demote-user",
     ],
     specific: ["provision", "sql", "costs", "validate-expose"],
+  },
+  admin: {
+    shared: [],
+    specific: ["lease-perpetual", "archive", "reactivate"],
   },
   deploy: { shared: [], specific: ["apply", "resume", "list", "events", "diagnose", "resolve", "release"] },
   ci: { shared: [], specific: ["link", "list", "revoke"] },

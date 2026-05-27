@@ -779,7 +779,6 @@ Tier and quotas are per billing account (not per project) — `set` is account-w
 - `run402 projects rest <id> <table> "<query>"`
 - `run402 projects keys <id>` — print anon_key + service_key as JSON
 - `run402 projects costs <id> [--window <24h|7d|30d|90d>]` — admin-only per-project finance: revenue, direct cost, margin, and cost breakdown. Uses the configured allowance wallet for admin auth; `RUN402_ADMIN_COOKIE='run402_admin=...'` is an optional browser-session override.
-- `run402 projects pin <id>` — pin a project (admin only; uses the configured allowance wallet for admin auth; project owners get 403 admin_required)
 - `run402 projects promote-user <id> <email>` — promote a user to project_admin role
 - `run402 projects demote-user <id> <email>` — demote a user from project_admin role
 - `run402 projects <usage|schema> <id>`
@@ -795,6 +794,13 @@ Provisioning automatically sets the new project as the active project. Other com
 SQL supports DDL + queries, returns JSON. REST uses PostgREST syntax (`select=`, `eq.`, `order=`, `limit=`).
 
 User auth: password + Google OAuth. See "User Auth" section below.
+
+### admin (platform-admin only, v1.57+)
+- `run402 admin lease-perpetual <billing_account_id> --enable | --disable` — toggle the account-level escape hatch. When enabled, the account never advances past `active` regardless of lease expiry; every project on the account is pinned. Enabling on a grace-state account (past_due / frozen / dormant) reactivates inline (`reactivated: true` in the response). Replaces the v1.56 `run402 projects pin` (gateway endpoint /projects/v1/admin/:id/pin was removed in v1.57).
+- `run402 admin archive <project_id> [--reason "..."]` — operator moderation. Sets `projects.archived_at = NOW()` on a single project; sibling projects on the same billing account keep serving. No-op when already archived (returns `note: "already archived"`).
+- `run402 admin reactivate <project_id>` — un-archive a project (flips `archived_at` back to NULL). In v1.57 this was narrowed: it no longer touches account-level lifecycle. To reactivate a grace-state account, run `run402 tier set <tier>` (the tier flow runs the lifecycle advance inline) or enable `run402 admin lease-perpetual <ba_id> --enable`.
+
+All admin subcommands require a platform-admin allowance wallet (or an admin OAuth session). Project owners with a non-admin wallet receive `403 admin_required`.
 
 ### deploy
 - `run402 deploy apply --manifest app.json [--project <id>] [--quiet|--final-only] [--allow-warning <code> ...] [--allow-warnings]` — unified apply primitive (v1.34 unified deploy → v2.0 unified apply with `assets` slice support)

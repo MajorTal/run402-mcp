@@ -82,7 +82,20 @@ import {
 // New tools — subdomains & projects
 import { listSubdomainsSchema, handleListSubdomains } from "./tools/list-subdomains.js";
 import { deleteProjectSchema, handleDeleteProject } from "./tools/delete-project.js";
-import { pinProjectSchema, handlePinProject } from "./tools/pin-project.js";
+
+// v1.57 — operator-only project + billing-account actions
+import {
+  adminSetLeasePerpetualSchema,
+  handleAdminSetLeasePerpetual,
+} from "./tools/admin-set-lease-perpetual.js";
+import {
+  adminArchiveProjectSchema,
+  handleAdminArchiveProject,
+} from "./tools/admin-archive-project.js";
+import {
+  adminReactivateProjectSchema,
+  handleAdminReactivateProject,
+} from "./tools/admin-reactivate-project.js";
 
 // New tools — user role management
 import { promoteUserSchema, handlePromoteUser } from "./tools/promote-user.js";
@@ -637,10 +650,24 @@ server.tool(
 // ─── Admin tools ─────────────────────────────────────────────────────────────
 
 server.tool(
-  "pin_project",
-  "Pin a project so it is not garbage-collected or expired. Admin only — uses the configured allowance wallet for run402 platform admin auth; project owners authenticating with service_key or a non-admin SIWX wallet will receive 403 admin_required. Not a self-service command for regular users.",
-  pinProjectSchema,
-  async (args) => handlePinProject(args),
+  "admin_set_lease_perpetual",
+  "Toggle a billing account's `lease_perpetual` escape hatch (v1.57+). When `lease_perpetual: true`, the account never advances past `active` regardless of lease expiry; every project on the account inherits the pinned state. Enabling on a grace-state account (past_due / frozen / dormant) reactivates inline and returns `reactivated: true`. Platform-admin only — uses the configured allowance wallet for admin auth. Replaces the v1.56 `pin_project` (gateway endpoint /projects/v1/admin/:id/pin was removed in v1.57). Calls POST /billing-accounts/v1/admin/:id/lease-perpetual.",
+  adminSetLeasePerpetualSchema,
+  async (args) => handleAdminSetLeasePerpetual(args),
+);
+
+server.tool(
+  "admin_archive_project",
+  "Operator moderation action — archive a single project (sets `projects.archived_at = NOW()`). Independent of account-level lifecycle: sibling projects on the same billing account keep serving. No-op when the project is already archived. Platform-admin only. Calls POST /projects/v1/admin/:id/archive.",
+  adminArchiveProjectSchema,
+  async (args) => handleAdminArchiveProject(args),
+);
+
+server.tool(
+  "admin_reactivate_project",
+  "Operator un-archive — flips `projects.archived_at` back to NULL. In v1.57 this was narrowed: it no longer touches account-level lifecycle. To reactivate a grace-state account, subscribe a tier (`tier_set`) or enable lease-perpetual (`admin_set_lease_perpetual`). Platform-admin only. Calls POST /projects/v1/admin/:id/reactivate.",
+  adminReactivateProjectSchema,
+  async (args) => handleAdminReactivateProject(args),
 );
 
 server.tool(

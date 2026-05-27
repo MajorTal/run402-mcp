@@ -111,6 +111,7 @@ describe("SKILL.md (root, MCP-based)", () => {
       { pattern: /\bvalue_hash\b/, reason: "secret value hashes are no longer public; list only keys/timestamps" },
       { pattern: /"secrets"\s*:\s*\{\s*"set"\s*:/, reason: "deploy specs must not carry secret values; use secrets.require" },
       { pattern: /\breplace_all\b/, reason: "secrets.replace_all is not representable in value-free deploy specs" },
+      { pattern: /\bpin_project\b/, reason: "pin_project was removed in v1.57; use admin_set_lease_perpetual" },
     ];
     for (const { pattern, reason } of banned) {
       it(`does not contain: ${pattern.source}`, () => {
@@ -222,6 +223,7 @@ describe("openclaw/SKILL.md (CLI-based)", () => {
       { pattern: /"secrets"\s*:\s*\[/, reason: "CLI deploy manifests must not carry legacy secret value arrays" },
       { pattern: /"secrets"\s*:\s*\{\s*"set"\s*:/, reason: "deploy specs must not carry secret values; use secrets.require" },
       { pattern: /\breplace_all\b/, reason: "secrets.replace_all is not representable in value-free deploy specs" },
+      { pattern: /\brun402 projects pin\b/, reason: "`run402 projects pin` was removed in v1.57; use `run402 admin lease-perpetual`" },
     ];
     for (const { pattern, reason } of banned) {
       it(`does not contain: ${pattern.source}`, () => {

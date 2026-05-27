@@ -564,8 +564,9 @@ For agents that need to sign Ethereum transactions. Private keys never leave AWS
 - **`allowance_status`** / **`allowance_create`** / **`allowance_export`** — local allowance management.
 - **`request_faucet`** — testnet USDC.
 - **`check_balance`** — USDC for an allowance address.
-- **`list_projects`** — active projects for a wallet.
-- **`pin_project`** — pin a project (admin only — uses the configured admin allowance wallet).
+- **`list_projects`** — active projects for a wallet. Each row carries v1.57 lifecycle fields: `effective_status`, `account_lifecycle_state` (same value across every project on the billing account), `lease_perpetual`, `deleted_at`, `archived_at`.
+- **`admin_set_lease_perpetual`** — operator escape hatch (v1.57+). Toggles the billing account's `lease_perpetual` flag so the account never advances past `active` regardless of lease expiry. Replaces the v1.56 per-project pin tool (gateway endpoint was removed). Enabling on a grace-state account reactivates inline.
+- **`admin_archive_project`** / **`admin_reactivate_project`** — operator moderation actions on a single project (`projects.archived_at`). Independent of account-level lifecycle.
 - **`project_info`** / **`project_keys`** / **`project_use`** — inspect / set the active project.
 - **`send_message`** — send feedback to the Run402 team.
 - **`set_agent_contact`** / **`get_agent_contact_status`** / **`verify_agent_contact_email`** — register agent contact info, read assurance status, and start the operator email reply challenge.
@@ -618,7 +619,7 @@ Project rate limit: **100 req/sec**. Exceeding returns 429 with `retry_after`. E
 
 ## Project lifecycle (~104-day soft delete)
 
-After lease expires, projects go through a state machine. The live data plane keeps serving the whole time — only the owner's control plane gets gated:
+Gateway v1.57 moved the lifecycle state machine from `internal.projects` to `internal.billing_accounts`. The grace clock now ticks per **billing account** — every project on the same account inherits the same `account_lifecycle_state`. The live data plane keeps serving the whole time; only the owner's control plane gets gated:
 
 | State | When | What happens |
 |-------|------|--------------|
@@ -626,9 +627,15 @@ After lease expires, projects go through a state machine. The live data plane ke
 | `past_due` | day 0 | Site, REST, email keep serving. Owner gets first email. |
 | `frozen` | +14d | Control plane (deploys, secrets, subdomain claims, function upload) returns 402 with `lifecycle_state` / `entered_state_at` / `next_transition_at`. Site still serves. Subdomain reserved so the brand can't be claimed by another wallet. |
 | `dormant` | +44d | Scheduled functions pause. |
-| `purged` | +104d | Cascade: schema dropped, Lambdas deleted, mailbox tombstoned. Subdomain becomes claimable 14 days later. |
+| `purged` | +104d | Cascade: schemas dropped, Lambdas deleted, mailboxes tombstoned. Subdomains become claimable 14 days later. |
 
-Calling **`set_tier`** during grace reactivates the project and clears all timers in one transaction. Pinned projects bypass the state machine entirely.
+Calling **`set_tier`** during grace reactivates the **account** inline and clears every project's timers in one transaction. Per-project fields on each `list_projects` row:
+
+- `effective_status` — derived for serving / UX. Equals `account_lifecycle_state` unless the project is individually archived (`archived_at` set → `archived`) or deleted (`deleted_at` set → `deleted`).
+- `account_lifecycle_state` — the raw per-account state. Identical across every project on the same account.
+- `lease_perpetual` — operator escape hatch flag on the owning account. When `true`, the account never advances past `active`. Replaces the v1.56 per-project `pinned`. Toggle via **`admin_set_lease_perpetual`** (platform-admin only).
+
+Operator moderation actions (independent of lifecycle, scoped to a single project): **`admin_archive_project`** and **`admin_reactivate_project`**.
 
 ## Standard Workflow
 
@@ -693,7 +700,7 @@ Other allowance options:
 |---|---|
 | `402 payment_required` on `set_tier` | Allowance is empty. Call `request_faucet` (testnet) or fund with real USDC. |
 | `402` with `lifecycle_state: frozen` | Project past lease + 14 days. `set_tier` reactivates instantly. |
-| `403 admin_required` | Tool is admin-only (e.g., `pin_project`). Use a platform admin allowance wallet; project owners can't pin their own projects. |
+| `403 admin_required` | Tool is platform-admin only (e.g., `admin_set_lease_perpetual`, `admin_archive_project`, `admin_reactivate_project`). Use a platform admin allowance wallet; project owners can't toggle these on their own. |
 | Empty `[]` from `rest_query` for anon | Table not in manifest with `expose: true`. Call `apply_expose`. |
 | `403 forbidden_function` calling an RPC | Function not in the manifest's `rpcs[]`. Add `{ name, signature, grant_to: ["authenticated"] }` and re-apply. |
 | `409 reserved` from `claim_subdomain` | Original owner's grace period — subdomain held until +118 days from lease expiry. |

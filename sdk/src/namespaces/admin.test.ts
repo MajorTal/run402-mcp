@@ -209,3 +209,112 @@ describe("admin.getProjectFinance", () => {
     assert.equal(calls.length, 0);
   });
 });
+
+describe("admin.setLeasePerpetual (v1.57)", () => {
+  it("POSTs to /billing-accounts/v1/admin/:id/lease-perpetual with admin headers", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({
+        status: "ok",
+        billing_account_id: "ba_known",
+        lease_perpetual: true,
+        reactivated: true,
+      }),
+    );
+    const result = await sdk(fetch).admin.setLeasePerpetual("ba_known", true);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.method, "POST");
+    assert.equal(
+      calls[0]!.url,
+      "https://api.test/billing-accounts/v1/admin/ba_known/lease-perpetual",
+    );
+    assert.equal(calls[0]!.headers["X-Admin-Mode"], "1");
+    assert.equal(calls[0]!.headers["SIGN-IN-WITH-X"], "t");
+    assert.deepEqual(JSON.parse(calls[0]!.body as string), { lease_perpetual: true });
+    assert.equal(result.lease_perpetual, true);
+    assert.equal(result.reactivated, true);
+  });
+
+  it("sends false to disable perpetual", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({ status: "ok", billing_account_id: "ba_known", lease_perpetual: false, reactivated: false }),
+    );
+    const result = await sdk(fetch).admin.setLeasePerpetual("ba_known", false);
+
+    assert.deepEqual(JSON.parse(calls[0]!.body as string), { lease_perpetual: false });
+    assert.equal(result.lease_perpetual, false);
+    assert.equal(result.reactivated, false);
+  });
+
+  it("URI-encodes the billing account id", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({ status: "ok", billing_account_id: "ba/has space", lease_perpetual: true, reactivated: false }),
+    );
+    await sdk(fetch).admin.setLeasePerpetual("ba/has space", true);
+    assert.equal(
+      calls[0]!.url,
+      "https://api.test/billing-accounts/v1/admin/ba%2Fhas%20space/lease-perpetual",
+    );
+  });
+});
+
+describe("admin.archiveProject (v1.57)", () => {
+  it("POSTs to /projects/v1/admin/:id/archive and forwards the reason", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({
+        status: "ok",
+        project_id: "prj_known",
+        archived_at: "2026-05-06T12:00:00.000Z",
+        reason: "ToS abuse",
+      }),
+    );
+    const result = await sdk(fetch).admin.archiveProject("prj_known", { reason: "ToS abuse" });
+
+    assert.equal(calls[0]!.method, "POST");
+    assert.equal(calls[0]!.url, "https://api.test/projects/v1/admin/prj_known/archive");
+    assert.equal(calls[0]!.headers["X-Admin-Mode"], "1");
+    assert.deepEqual(JSON.parse(calls[0]!.body as string), { reason: "ToS abuse" });
+    assert.equal(result.archived_at, "2026-05-06T12:00:00.000Z");
+    assert.equal(result.reason, "ToS abuse");
+  });
+
+  it("sends an empty body when no reason is given", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({ status: "ok", project_id: "prj_known", archived_at: "2026-05-06T12:00:00.000Z" }),
+    );
+    await sdk(fetch).admin.archiveProject("prj_known");
+    assert.deepEqual(JSON.parse(calls[0]!.body as string), {});
+  });
+
+  it("surfaces the 'already archived' no-op envelope without throwing", async () => {
+    const { fetch } = mockFetch(() =>
+      json({ status: "ok", project_id: "prj_known", note: "already archived" }),
+    );
+    const result = await sdk(fetch).admin.archiveProject("prj_known", { reason: "second try" });
+    assert.equal(result.note, "already archived");
+    assert.equal(result.archived_at, undefined);
+  });
+});
+
+describe("admin.reactivateProject (v1.57)", () => {
+  it("POSTs to /projects/v1/admin/:id/reactivate", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({ status: "ok", project_id: "prj_known", reactivated: true }),
+    );
+    const result = await sdk(fetch).admin.reactivateProject("prj_known");
+
+    assert.equal(calls[0]!.method, "POST");
+    assert.equal(calls[0]!.url, "https://api.test/projects/v1/admin/prj_known/reactivate");
+    assert.equal(calls[0]!.headers["X-Admin-Mode"], "1");
+    assert.equal(result.reactivated, true);
+  });
+
+  it("surfaces the 'not archived' no-op envelope without throwing", async () => {
+    const { fetch } = mockFetch(() =>
+      json({ status: "ok", project_id: "prj_known", note: "not archived" }),
+    );
+    const result = await sdk(fetch).admin.reactivateProject("prj_known");
+    assert.equal(result.note, "not archived");
+    assert.equal(result.reactivated, undefined);
+  });
+});

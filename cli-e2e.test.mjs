@@ -190,9 +190,28 @@ async function mockFetch(input, init) {
   if (path.match(/^\/projects\/v1\/[^/]+$/) && method === "DELETE") {
     return Promise.resolve(noContent());
   }
-  if (path.match(/^\/projects\/v1\/admin\/[^/]+\/pin$/) && method === "POST") {
+  if (path.match(/^\/billing-accounts\/v1\/admin\/[^/]+\/lease-perpetual$/) && method === "POST") {
+    const accountId = path.split("/").at(-2);
+    const desired = Boolean(body?.lease_perpetual);
+    return Promise.resolve(json({
+      status: "ok",
+      billing_account_id: accountId,
+      lease_perpetual: desired,
+      reactivated: desired,
+    }));
+  }
+  if (path.match(/^\/projects\/v1\/admin\/[^/]+\/archive$/) && method === "POST") {
     const projectId = path.split("/").at(-2);
-    return Promise.resolve(json({ status: "pinned", project_id: projectId }));
+    return Promise.resolve(json({
+      status: "ok",
+      project_id: projectId,
+      archived_at: "2026-05-06T12:00:00.000Z",
+      reason: body?.reason ?? "(no reason given)",
+    }));
+  }
+  if (path.match(/^\/projects\/v1\/admin\/[^/]+\/reactivate$/) && method === "POST") {
+    const projectId = path.split("/").at(-2);
+    return Promise.resolve(json({ status: "ok", project_id: projectId, reactivated: true }));
   }
   if (
     (path === "/projects/v1/expose/validate" ||
@@ -1838,8 +1857,13 @@ describe("CLI e2e happy path", () => {
     assert.equal(seenCookie, "run402_admin=test-session");
   });
 
-  it("projects pin uses allowance admin auth, not project service key auth", async () => {
-    const { run } = await import("./cli/lib/projects.mjs");
+  // v1.57: projects pin was removed in favor of admin lease-perpetual.
+  // Same auth shape — allowance SIWX, X-Admin-Mode: 1, no Bearer service_key.
+  // The mockFetch lease-perpetual route echoes the request body back as the
+  // `lease_perpetual` field of the response, so verifying the response shape
+  // is equivalent to verifying the body went out correctly.
+  it("admin lease-perpetual uses allowance admin auth, not project service key auth", async () => {
+    const { run } = await import("./cli/lib/admin.mjs");
     const { saveAllowance } = await import("./cli/lib/config.mjs");
     saveAllowance({
       address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
@@ -1849,19 +1873,22 @@ describe("CLI e2e happy path", () => {
       rail: "x402",
     });
     let seenUrl = null;
+    let seenMethod = null;
     let seenSiwx = null;
     let seenAdminMode = null;
     let seenAuthorization = null;
     const prevFetch = globalThis.fetch;
     globalThis.fetch = (input, init) => {
       const url = typeof input === "string" ? input : (input instanceof Request ? input.url : String(input));
-      if (url.includes("/projects/v1/admin/prj_external/pin")) {
+      if (url.includes("/billing-accounts/v1/admin/ba_external/lease-perpetual")) {
         seenUrl = url;
         if (input instanceof Request) {
+          seenMethod = input.method;
           seenSiwx = input.headers.get("sign-in-with-x");
           seenAdminMode = input.headers.get("x-admin-mode");
           seenAuthorization = input.headers.get("authorization");
         } else {
+          seenMethod = init?.method ?? "GET";
           const headers = init?.headers ?? {};
           seenSiwx = headers["SIGN-IN-WITH-X"] ?? headers["sign-in-with-x"] ?? null;
           seenAdminMode = headers["X-Admin-Mode"] ?? headers["x-admin-mode"] ?? null;
@@ -1872,19 +1899,23 @@ describe("CLI e2e happy path", () => {
     };
     captureStart();
     try {
-      await run("pin", ["prj_external"]);
+      await run("lease-perpetual", ["ba_external", "--enable"]);
     } finally {
       captureStop();
       globalThis.fetch = prevFetch;
     }
-    assert.ok(seenUrl && seenUrl.includes("/projects/v1/admin/prj_external/pin"),
-      `pin should hit the admin pin endpoint; got: ${seenUrl}`);
-    assert.equal(typeof seenSiwx, "string", "pin should send allowance SIWX admin-wallet auth");
-    assert.equal(seenAdminMode, "1", "pin should explicitly request admin mode");
-    assert.equal(seenAuthorization, null, "pin must not use the project's service_key as Bearer auth");
+    assert.ok(
+      seenUrl && seenUrl.includes("/billing-accounts/v1/admin/ba_external/lease-perpetual"),
+      `lease-perpetual should hit the admin endpoint; got: ${seenUrl}`,
+    );
+    assert.equal(seenMethod, "POST");
+    assert.equal(typeof seenSiwx, "string", "lease-perpetual should send allowance SIWX admin-wallet auth");
+    assert.equal(seenAdminMode, "1", "lease-perpetual should explicitly request admin mode");
+    assert.equal(seenAuthorization, null, "lease-perpetual must not use a service_key as Bearer auth");
     const parsed = JSON.parse(capturedStdout());
-    assert.equal(parsed.status, "pinned");
-    assert.equal(parsed.project_id, "prj_external");
+    assert.equal(parsed.billing_account_id, "ba_external");
+    assert.equal(parsed.lease_perpetual, true,
+      "mockFetch echoes the request body; if this is false, the body didn't carry lease_perpetual:true");
   });
 
   it("projects schema defaults to active project (GH-102)", async () => {
@@ -4281,11 +4312,12 @@ describe("CLI e2e happy path", () => {
     bannerRegex: /^run402 projects/,
   });
 
-  // GH-103: `projects pin` must be clearly marked as admin-only in help text.
-  // The server-side /projects/v1/admin/:id/pin endpoint rejects project-owner
-  // auth (service_key / SIWX) with 403 admin_required. Help text that omits
-  // the admin caveat leads owners into an error they cannot resolve.
-  it("projects pin --help marks pin as admin-only (GH-103)", async () => {
+  // v1.57: `projects pin` was removed. The CLI now surfaces a structured
+  // REMOVED_COMMAND error pointing users at `admin lease-perpetual` — without
+  // making a network call — so owners who follow stale docs get redirected
+  // instead of hitting a 404. The replacement help (lease-perpetual / archive
+  // / reactivate) must clearly mark itself as admin-only.
+  it("projects pin returns REMOVED_COMMAND with a hint at admin lease-perpetual (v1.57)", async () => {
     const { run } = await import("./cli/lib/projects.mjs");
     let fetchCalled = false;
     const prevFetch = globalThis.fetch;
@@ -4293,23 +4325,44 @@ describe("CLI e2e happy path", () => {
     let threw = null;
     captureStart();
     try {
-      await run("pin", ["--help"]);
+      await run("pin", ["prj_anything"]);
     } catch (e) {
       threw = e;
     } finally {
       captureStop();
       globalThis.fetch = prevFetch;
     }
-    assert.equal(threw?.message, "process.exit(0)", "pin --help should exit 0");
-    assert.equal(fetchCalled, false, "pin --help must not make any fetch/API call");
+    assert.equal(threw?.message, "process.exit(1)", "projects pin should exit non-zero");
+    assert.equal(fetchCalled, false, "removed command must not make any fetch/API call");
+    const stderr = capturedStderr();
+    const envelope = JSON.parse(stderr.trim());
+    assert.equal(envelope.code, "REMOVED_COMMAND");
+    assert.match(envelope.hint, /admin lease-perpetual/i,
+      `hint should point at admin lease-perpetual; got: ${envelope.hint}`);
+  });
+
+  it("admin --help marks subcommands as admin-only (v1.57 replacements)", async () => {
+    const { run } = await import("./cli/lib/admin.mjs");
+    let fetchCalled = false;
+    const prevFetch = globalThis.fetch;
+    globalThis.fetch = (...args) => { fetchCalled = true; return prevFetch(...args); };
+    let threw = null;
+    captureStart();
+    try {
+      await run("--help", []);
+    } catch (e) {
+      threw = e;
+    } finally {
+      captureStop();
+      globalThis.fetch = prevFetch;
+    }
+    assert.equal(threw?.message, "process.exit(0)", "admin --help should exit 0");
+    assert.equal(fetchCalled, false, "admin --help must not make any fetch/API call");
     const stdout = capturedStdout();
-    // Find the pin line in the subcommand list and assert it mentions admin.
-    const pinLine = stdout.split("\n").find(l => /^\s*pin\s/.test(l)) ?? "";
-    assert.match(
-      pinLine,
-      /admin/i,
-      `pin subcommand line should mention admin-only; got: ${pinLine}`,
-    );
+    assert.match(stdout, /admin/i, "admin help should mention admin gating");
+    assert.match(stdout, /lease-perpetual/);
+    assert.match(stdout, /archive/);
+    assert.match(stdout, /reactivate/);
   });
 
   // Also spot-check the short flag alias -h works.

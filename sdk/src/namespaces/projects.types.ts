@@ -29,11 +29,62 @@ export interface ProvisionResult {
 
 // ─── list ───────────────────────────────────────────────────────────────
 
+/**
+ * Lifecycle state of the owning billing account (gateway v1.57+). The state
+ * machine moved from `internal.projects` to `internal.billing_accounts`; every
+ * project on the account inherits the same value. `purging` is an internal
+ * transition state and is not exposed on the wire.
+ */
+export type BillingAccountLifecycleState =
+  | "active"
+  | "past_due"
+  | "frozen"
+  | "dormant"
+  | "purged";
+
+/**
+ * Effective project status, derived from `(account_lifecycle_state,
+ * deleted_at, archived_at)`:
+ *   - `deleted_at` set → `"deleted"`
+ *   - `archived_at` set → `"archived"`
+ *   - otherwise → the account's `lifecycle_state`
+ *
+ * Use this for serving / UX decisions instead of trying to combine the
+ * underlying fields yourself.
+ */
+export type EffectiveProjectStatus =
+  | "active"
+  | "past_due"
+  | "frozen"
+  | "dormant"
+  | "archived"
+  | "deleted";
+
 export interface ProjectSummary {
   id: string;
   name: string;
   tier: string;
-  status: string;
+  /**
+   * Derived effective status — see {@link EffectiveProjectStatus}. Prefer
+   * this over `account_lifecycle_state` for serving decisions because it
+   * collapses per-project `deleted_at` / `archived_at` into the same union.
+   */
+  effective_status: EffectiveProjectStatus;
+  /**
+   * The owning billing account's lifecycle state. Every project on the
+   * same account shares this value (gateway v1.57+).
+   */
+  account_lifecycle_state: BillingAccountLifecycleState;
+  /**
+   * Mirror of the owning billing account's `lease_perpetual` flag. When
+   * `true`, the account never advances past `active` regardless of lease
+   * expiry. Replaces the v1.56 per-project `pinned`.
+   */
+  lease_perpetual: boolean;
+  /** ISO timestamp when the user deleted this project. `null` if the project still exists. */
+  deleted_at: string | null;
+  /** ISO timestamp when an operator archived this project. `null` if not archived. */
+  archived_at: string | null;
   api_calls: number;
   storage_bytes: number;
   /**
@@ -65,7 +116,10 @@ export interface UsageReport {
    * `null` is reserved for unleased accounts (see GH-163).
    */
   lease_expires_at?: string | null;
-  status: string;
+  /** Derived effective status — see {@link EffectiveProjectStatus}. */
+  effective_status: EffectiveProjectStatus;
+  /** Owning billing account's lifecycle state. */
+  account_lifecycle_state: BillingAccountLifecycleState;
 }
 
 // ─── schema ─────────────────────────────────────────────────────────────
@@ -163,14 +217,6 @@ export interface ExposeManifestValidationResult {
   hasErrors: boolean;
   errors: ExposeManifestValidationIssue[];
   warnings: ExposeManifestValidationIssue[];
-}
-
-// ─── pin ────────────────────────────────────────────────────────────────
-
-export interface PinResult {
-  status: string;
-  project_id: string;
-  message?: string;
 }
 
 // ─── quote ──────────────────────────────────────────────────────────────

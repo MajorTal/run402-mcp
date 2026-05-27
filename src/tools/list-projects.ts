@@ -34,13 +34,23 @@ export async function handleListProjects(args: {
       `the same account-level tier and quota pool. Use \`tier_status\` to see`,
       `the pooled api_calls / storage_bytes across all of these projects.`,
       ``,
-      `| ID | Name | Account tier | Status | Expires |`,
-      `|----|------|--------------|--------|---------|`,
+      `Status fields (gateway v1.57+):`,
+      `- **Effective status**: derived state for serving — \`active\` /`,
+      `  \`past_due\` / \`frozen\` / \`dormant\` / \`archived\` / \`deleted\`.`,
+      `- **Account lifecycle**: shared across every project on the same`,
+      `  billing account. Differs from effective status when a single project`,
+      `  is archived or deleted while siblings keep serving.`,
+      `- **Lease perpetual**: operator escape hatch (mirrors the account's`,
+      `  \`lease_perpetual\` flag). When \`true\`, the account never advances`,
+      `  past \`active\` regardless of lease expiry — replaces the v1.56 pin.`,
+      ``,
+      `| ID | Name | Account tier | Effective status | Account lifecycle | Lease perpetual |`,
+      `|----|------|--------------|------------------|-------------------|-----------------|`,
     ];
 
     for (const p of body.projects) {
       lines.push(
-        `| \`${p.id}\` | ${p.name} | ${p.tier} | ${p.status} | ${p.lease_expires_at} |`,
+        `| \`${p.id}\` | ${p.name} | ${p.tier} | ${p.effective_status} | ${p.account_lifecycle_state} | ${p.lease_perpetual ? "yes" : "no"} |`,
       );
     }
 

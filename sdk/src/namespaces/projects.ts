@@ -2,8 +2,13 @@
  * `projects` namespace — project lifecycle, introspection, and admin.
  *
  * Covers:
- *   - remote: provision, delete, list, getUsage, getSchema, pin, getQuote
+ *   - remote: provision, delete, list, getUsage, getSchema, getQuote
  *   - local:  info, keys, use (require provider support for persistence methods)
+ *
+ * Operator-only project actions live on the {@link Admin} namespace:
+ *   - `admin.archiveProject` / `admin.reactivateProject` — moderate-archive
+ *   - `admin.setLeasePerpetual` — account-level escape hatch (replaces the
+ *     v1.56 `projects.pin` removed in v1.57)
  */
 
 import type { Client } from "../kernel.js";
@@ -15,7 +20,6 @@ import type {
   ExposeManifestValidationInput,
   ExposeManifestValidationResult,
   ListProjectsResult,
-  PinResult,
   ProjectInfo,
   ProjectRestOptions,
   ProjectRestResponse,
@@ -294,25 +298,6 @@ export class Projects {
     return this.client.request<ExposeManifest>(`/projects/v1/admin/${id}/expose`, {
       headers: { Authorization: `Bearer ${keys.service_key}` },
       context: "getting expose manifest",
-    });
-  }
-
-  /**
-   * Pin a project so it is not garbage-collected or expired.
-   *
-   * Admin only — the server-side `POST /projects/v1/admin/:id/pin`
-   * endpoint requires run402 platform admin auth. The Node SDK uses the
-   * configured allowance wallet's SIWX headers for this call; project
-   * service keys are intentionally not sent. Project owners calling with
-   * a non-admin wallet will receive `403 admin_required`; this is by
-   * design and not a bug in the SDK. The method is retained so operator
-   * tooling can share the same SDK.
-   */
-  async pin(id: string): Promise<PinResult> {
-    return this.client.request<PinResult>(`/projects/v1/admin/${id}/pin`, {
-      method: "POST",
-      headers: { "X-Admin-Mode": "1" },
-      context: "pinning project",
     });
   }
 
