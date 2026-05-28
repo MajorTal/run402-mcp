@@ -63,36 +63,8 @@ export type EffectiveProjectStatus =
 export interface ProjectSummary {
   id: string;
   name: string;
-  tier: string;
-  /**
-   * Derived effective status — see {@link EffectiveProjectStatus}. Prefer
-   * this over `account_lifecycle_state` for serving decisions because it
-   * collapses per-project `deleted_at` / `archived_at` into the same union.
-   */
-  effective_status: EffectiveProjectStatus;
-  /**
-   * The owning billing account's lifecycle state. Every project on the
-   * same account shares this value (gateway v1.57+).
-   */
-  account_lifecycle_state: BillingAccountLifecycleState;
-  /**
-   * Mirror of the owning billing account's `lease_perpetual` flag. When
-   * `true`, the account never advances past `active` regardless of lease
-   * expiry. Replaces the v1.56 per-project `pinned`.
-   */
-  lease_perpetual: boolean;
-  /** ISO timestamp when the user deleted this project. `null` if the project still exists. */
-  deleted_at: string | null;
-  /** ISO timestamp when an operator archived this project. `null` if not archived. */
-  archived_at: string | null;
   api_calls: number;
   storage_bytes: number;
-  /**
-   * Optional: the gateway's project list does not currently include the
-   * lease expiry. Read it from `r.tier.status()` if you need it.
-   * `null` is reserved for unleased accounts.
-   */
-  lease_expires_at?: string | null;
   created_at: string;
 }
 

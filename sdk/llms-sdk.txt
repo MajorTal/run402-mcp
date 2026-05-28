@@ -625,15 +625,15 @@ promoteUser(id, email): Promise<void> // project-admin role helper
 demoteUser(id, email): Promise<void>
 ```
 
-**v1.57 lifecycle fields on `ProjectSummary` / `UsageReport`.** Gateway v1.57 moved the lifecycle state machine from `internal.projects` to `internal.billing_accounts`. Each `list()` entry and the `getUsage()` envelope expose:
+**Tier and lifecycle are per-account, not per project.** The state machine lives on `internal.billing_accounts` (v1.46 / v1.57). Read it from `r.tier.status()`:
 
-- `effective_status: EffectiveProjectStatus` — `"active" | "past_due" | "frozen" | "dormant" | "archived" | "deleted"`. Derived: `deleted_at` → `"deleted"`; `archived_at` → `"archived"`; otherwise the account's lifecycle state. Use this for serving / UX.
-- `account_lifecycle_state: BillingAccountLifecycleState` — `"active" | "past_due" | "frozen" | "dormant" | "purged"`. The raw per-account state; identical across every project on the same billing account.
-- `lease_perpetual: boolean` (list only) — operator escape hatch flag. When `true`, the account never advances past `active`. Replaces the v1.56 per-project `pinned`.
-- `deleted_at: string | null` (list only) — ISO timestamp when the user deleted this project.
-- `archived_at: string | null` (list only) — ISO timestamp when an operator archived this project.
+- `account_lifecycle_state: "active" | "past_due" | "frozen" | "dormant" | "purged" | null` — the account's lifecycle state; `null` only for orphan wallets with no billing account row.
+- `lease_perpetual: boolean | null` — operator escape hatch flag. When `true`, the account never advances past `active` regardless of lease expiry.
+- `tier: "prototype" | "hobby" | "team" | null` — the account's active tier.
 
-The v1.56 `status` and `pinned` fields are no longer part of the typed SDK surface. The gateway still emits them as wire mirrors during the one-release v1.57 compat window; the next gateway version drops them entirely. The v1.56 `projects.pin(id)` SDK method was removed alongside the endpoint — use `r.admin.setLeasePerpetual(ba_id, true)`.
+`r.projects.list(wallet)` returns per-project facts only (`id`, `name`, `api_calls`, `storage_bytes`, `created_at`). The v1.56 `status` / `pinned` / `tier` mirrors and the v1.57 `effective_status` / `account_lifecycle_state` / `lease_perpetual` per-project mirrors were dropped. The v1.56 `projects.pin(id)` SDK method was removed alongside the endpoint — use `r.admin.setLeasePerpetual(ba_id, true)`.
+
+`r.projects.getUsage(id)` still surfaces `effective_status` and `account_lifecycle_state` because that endpoint scopes to a single project and the derivation collapses per-project `archived_at` / `deleted_at` together with the account's lifecycle.
 
 ### `r.project(id).apply` (mutations) + `r.project(id).deploy` (observability)
 
