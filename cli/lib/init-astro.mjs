@@ -215,11 +215,10 @@ const { title, ogImage, canonical } = Astro.props;
 //   2. DB update.
 //   3. cache.invalidate() so the public URL re-renders fresh on next visit.
 import type { APIRoute } from "astro";
-import { db, getUser, cache } from "@run402/functions";
+import { db, auth, cache } from "@run402/functions";
 
 export const POST: APIRoute = async ({ request }) => {
-  const user = await getUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
+  const user = await auth.requireUser();
 
   const body = (await request.json()) as { slug: string; title: string; html: string };
   if (!body?.slug) return new Response("Missing slug", { status: 400 });
@@ -236,6 +235,96 @@ export const POST: APIRoute = async ({ request }) => {
     headers: { "content-type": "application/json" },
   });
 };
+`,
+    },
+    {
+      path: "AGENTS.md",
+      content: `# AGENTS.md
+
+This file documents the brutally-small Run402 surface this Astro project
+uses. Coding agents: read this first. The platform is intentionally small —
+there are no other auth helpers, no other client surfaces, and no other
+hidden APIs.
+
+## The auth surface
+
+\`auth\` is the entire user-auth surface. Import from \`@run402/functions\`:
+
+\`\`\`ts
+import { auth } from "@run402/functions";
+
+// In SSR pages and API routes:
+const user = await auth.user();             // Actor | null
+const user = await auth.requireUser();      // Actor; throws R402_AUTH_REQUIRED
+const { user, role } = await auth.requireRole("admin");
+const { user, membership } = await auth.requireMembership("member");
+await auth.requireFresh({ maxAge: "10m", amr: ["passkey"] });
+
+// CSRF for hosted forms (server-side, in <form> rendering):
+const field = auth.csrfField();
+// → <input type="hidden" name="_csrf" value="..." />
+
+// Cross-origin-safe fetch (auto-forwards actor context to same-origin):
+const res = await auth.fetch("/api/internal");  // relative URLs only
+\`\`\`
+
+## The four Never rules
+
+1. **Never \`try\`/\`catch\` auth errors.** Let them bubble. The platform turns
+   \`R402_AUTH_REQUIRED\` into a 303 to \`/auth/sign-in?return_to=…\` and
+   \`R402_AUTH_INSUFFICIENT_ROLE\` into 403 with a fix-it response. Catching
+   them creates silent-null bugs.
+
+2. **Never \`.eq("user_id", user.id)\`.** \`db()\` propagates the actor to
+   PostgREST so RLS enforces ownership server-side. The redundant filter is
+   a code smell that \`run402 doctor\` flags as
+   \`R402_AUTH_REDUNDANT_USER_FILTER\`.
+
+3. **Never set client-supplied actor headers.** \`x-run402-actor-*\`,
+   \`run402.actor.*\`, \`x-r402-actor-*\` are platform-owned channel headers.
+   The gateway strips inbound spoofing attempts and emits
+   \`R402_AUTH_ACTOR_HEADER_SPOOF\` in strict mode.
+
+4. **Never mint a session from a raw \`userId\`.** Use
+   \`auth.sessions.createResponseFromIdentity({ provider, subject, proof, amr })\`
+   with a verified identity proof. No \`createSessionForUserId(uuid)\` API exists.
+
+## Hosted UI components
+
+For sign-in, sign-up, and sign-out chrome, use the platform's
+\`@run402/astro\` components — they emit forms posting to platform hosted
+routes (\`/auth/v1/sign-in\` etc.) with the CSRF token already wired:
+
+\`\`\`astro
+---
+import { SignIn, SignUp, UserButton, SignedIn, SignedOut } from "@run402/astro";
+---
+
+<SignedIn>
+  <UserButton />
+</SignedIn>
+<SignedOut>
+  <SignIn returnTo="/dashboard" />
+</SignedOut>
+\`\`\`
+
+Do NOT roll your own sign-in form. The hosted routes handle CSRF, returnTo
+validation, OAuth provider bridges, and passkey ceremonies.
+
+## Rendering-mode quick map
+
+\`auth.*\` calls run at request time, so the page must be SSR or a
+server-island. Calling \`auth.user()\` from a prerendered page throws
+\`R402_AUTH_PRERENDERED\`.
+
+| Mode                          | When                                | Auth-aware              |
+| ----------------------------- | ----------------------------------- | ----------------------- |
+| SSR (default)                 | Personalized pages                  | \`auth.user()\` works   |
+| Prerendered                   | Marketing pages, never sees actor   | \`auth.*\` throws       |
+| Server island                 | Prerendered page + personalized slot| \`auth.*\` in the island|
+| Client hydrate                | Visibility-only, no SSR pass        | Component hits session  |
+
+For error-code reference: https://run402.com/errors/#R402_AUTH_REQUIRED
 `,
     },
   ];

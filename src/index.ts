@@ -357,7 +357,7 @@ server.tool(
 
 server.tool(
   "deploy_function",
-  "Deploy a serverless function (Node 22) to a project. Handler signature: export default async (req: Request) => Response. The function can `import { db, adminDb, getUser, email, ai } from '@run402/functions'` — auto-bundled by the platform. Additional npm packages are bundled at deploy time when listed in `deps` (bare names resolve to latest; pinned/range specs are honored verbatim; `@run402/functions` and `run402-functions` rejected; max 30 entries; native binaries rejected). The response includes `runtime_version` (the bundled `@run402/functions` version — surface as 'Functions runtime version', never bare 'runtime'), `deps_resolved` (map of dep name → installed concrete version), and an optional top-level `warnings` array (sibling to the function record).",
+  "Deploy a serverless function (Node 22) to a project. Handler signature: export default async (req: Request) => Response. The function can `import { db, adminDb, auth, email, ai } from '@run402/functions'` — auto-bundled by the platform. Additional npm packages are bundled at deploy time when listed in `deps` (bare names resolve to latest; pinned/range specs are honored verbatim; `@run402/functions` and `run402-functions` rejected; max 30 entries; native binaries rejected). The response includes `runtime_version` (the bundled `@run402/functions` version — surface as 'Functions runtime version', never bare 'runtime'), `deps_resolved` (map of dep name → installed concrete version), and an optional top-level `warnings` array (sibling to the function record).",
   deployFunctionSchema,
   async (args) => handleDeployFunction(args),
 );

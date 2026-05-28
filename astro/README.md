@@ -81,6 +81,63 @@ Three options if your SSR route needs request-time config:
 
 The Run402 anon key + service key + project ID + JWT secret + API base ARE auto-injected at deploy time (you'll see `RUN402_ANON_KEY`, `RUN402_SERVICE_KEY`, `RUN402_PROJECT_ID`, `RUN402_JWT_SECRET`, `RUN402_API_BASE` in `process.env` from inside the SSR runtime — those are the platform-managed channel).
 
+### Rendering-mode pattern matrix
+
+Astro supports four rendering modes; `auth.*` calls have different semantics in each. Pick the right mode per page and the rest follows.
+
+| Mode             | How to opt in                                  | When to use                                                       | Auth + cache                                                                                              |
+| ---------------- | ---------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| SSR (default)    | The default in v1.0; no flag needed.           | Personalized pages that read the actor.                          | `auth.user()` returns the actor; `auth.*` helpers taint the response so cache bypasses on Set-Cookie / auth. |
+| Prerendered      | `export const prerender = true;` in the page.  | Pure marketing / docs pages that never see the actor.            | `auth.*` throws `R402_AUTH_PRERENDERED`. The page is built once and served as a static asset.              |
+| Server island    | `<Component server:defer />` inside a page.    | Mostly-static page with a personalized slot (e.g. user dropdown). | `auth.*` is available **inside** the island. The shell is still cacheable.                                  |
+| Client hydrate   | `<SignedIn client:load>…</SignedIn>`.          | Cookie-aware visibility without an SSR pass at all.              | Component fetches `/auth/v1/session` from the browser. No server `auth.*` call.                            |
+
+Pattern picker:
+
+```astro
+---
+// Personalized SSR (default in this scaffold)
+import { auth } from "@run402/functions";
+const user = await auth.requireUser();           // 303 to /auth/sign-in if anonymous
+---
+<h1>Hello, {user.email}</h1>
+```
+
+```astro
+---
+// Prerendered marketing page
+export const prerender = true;
+// Do NOT call auth.user() here — it throws R402_AUTH_PRERENDERED at build time
+---
+<h1>Welcome to the product</h1>
+```
+
+```astro
+---
+// Server-island mix: shell is cacheable, island streams in
+import UserDropdown from "../components/UserDropdown.astro";
+---
+<header>
+  <nav>...</nav>
+  <UserDropdown server:defer>
+    <span slot="fallback">Loading…</span>
+  </UserDropdown>
+</header>
+```
+
+```astro
+---
+// Client-hydrated visibility-only (no SSR auth read)
+import { SignedIn, SignedOut, SignIn, UserButton } from "@run402/astro";
+---
+<SignedIn client:load>
+  <UserButton />
+</SignedIn>
+<SignedOut client:load>
+  <SignIn returnTo="/" />
+</SignedOut>
+```
+
 ## `<Run402Picture>` — runtime CMS images
 
 For images coming from a DB row at SSR time (the common CMS pattern), use `<Run402Picture asset={page.hero_asset}>`. The `asset` prop is the `AssetRef` JSONB that `r.assets.put()` returned at upload time — store the whole object, not just the URL, then render directly.

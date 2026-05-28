@@ -896,6 +896,15 @@ describe("CLI/MCP SDK-boundary guard", () => {
       ["cli/lib/init.mjs", [/\bfetch\(TEMPO_RPC\b/]], // Tempo faucet/RPC
       ["cli/lib/ci.mjs", [/\bfetch\(`https:\/\/api\.github\.com\/repos\//]], // GitHub repository lookup
       ["src/tools/init.ts", [/\bfetch\(TEMPO_RPC\b/]], // Tempo faucet/RPC
+      // doctor-source-scan.mjs documents the canonical fix string for
+      // browser-bearer scans — the string itself contains "auth.fetch()"
+      // as the recommended replacement, not a real fetch call.
+      ["cli/lib/doctor-source-scan.mjs", [/Use auth\.fetch\(\) for same-origin/]],
+      // init-astro.mjs emits scaffold *strings* that get written into the
+      // user's generated project. `auth.fetch("/api/internal")` is the
+      // recommended SDK pattern shown in the template — it is template
+      // text, not a CLI-runtime fetch.
+      ["cli/lib/init-astro.mjs", [/auth\.fetch\("\/api\/internal"\)/, /Cross-origin-safe fetch/]],
     ]);
 
     const violations: string[] = [];
@@ -927,7 +936,7 @@ function productionInterfaceFiles(): string[] {
   const srcTools = join(__dirname, "src/tools");
   return [
     ...readdirSync(cliLib)
-      .filter((name) => name.endsWith(".mjs"))
+      .filter((name) => name.endsWith(".mjs") && !name.endsWith(".test.mjs"))
       .map((name) => join(cliLib, name)),
     ...readdirSync(srcTools)
       .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
