@@ -21,14 +21,19 @@ import { fail } from "./sdk-errors.mjs";
 const HELP = `run402 init astro — Scaffold a deployable Astro project
 
 Usage:
-  run402 init astro [<dir>] [--force] [--json]
+  run402 init astro [<dir>] [--force]
 
 Arguments:
   <dir>        Target directory (default: current directory)
 
 Options:
   --force      Overwrite a non-empty directory
-  --json       Emit a structured JSON summary on stdout
+
+Output:
+  Stdout is a JSON summary { dir, files_created, created, next_steps }.
+  Progress lines ("Scaffolded ...", "Files created:", "Next steps:") go to
+  stderr so a human re-running interactively sees what's happening while
+  a script piping stdout to jq stays clean.
 
 The scaffolded project includes:
   - package.json (with 'dev' / 'deploy' scripts)
@@ -53,7 +58,6 @@ export async function runInitAstro(args = []) {
     return;
   }
   const force = args.includes("--force");
-  const json = args.includes("--json");
   const positionals = args.filter((a) => !a.startsWith("--"));
   const targetDir = resolve(positionals[0] ?? ".");
 
@@ -155,7 +159,7 @@ import Layout from "../layouts/Layout.astro";
 // SSR time. The first request renders + caches; subsequent requests
 // HIT the cache. When an admin edits the row, call cache.invalidate()
 // from your save handler for sub-second freshness.
-import { db, getUser, cache } from "@run402/functions";
+import { db } from "@run402/functions";
 import Layout from "../layouts/Layout.astro";
 
 const { slug } = Astro.params;
@@ -335,32 +339,31 @@ For error-code reference: https://run402.com/errors/#R402_AUTH_REQUIRED
     writeFileSync(fullPath, file.content, "utf-8");
   }
 
-  if (json) {
-    console.log(
-      JSON.stringify(
-        {
-          dir: targetDir,
-          files_created: files.map((f) => f.path),
-          created: true,
-          next_steps: [
-            `cd ${positionals[0] ?? "."}`,
-            "npm install",
-            "run402 deploy",
-          ],
-        },
-        null,
-        2,
-      ),
-    );
-  } else {
-    console.log(`Scaffolded Astro project at ${targetDir}`);
-    console.log("");
-    console.log("Files created:");
-    for (const f of files) console.log(`  - ${f.path}`);
-    console.log("");
-    console.log("Next steps:");
-    if (positionals[0]) console.log(`  cd ${positionals[0]}`);
-    console.log("  npm install");
-    console.log("  run402 deploy");
-  }
+  // Human-readable progress goes to stderr; stdout stays JSON-clean.
+  console.error(`Scaffolded Astro project at ${targetDir}`);
+  console.error("");
+  console.error("Files created:");
+  for (const f of files) console.error(`  - ${f.path}`);
+  console.error("");
+  console.error("Next steps:");
+  if (positionals[0]) console.error(`  cd ${positionals[0]}`);
+  console.error("  npm install");
+  console.error("  run402 deploy");
+
+  console.log(
+    JSON.stringify(
+      {
+        dir: targetDir,
+        files_created: files.map((f) => f.path),
+        created: true,
+        next_steps: [
+          `cd ${positionals[0] ?? "."}`,
+          "npm install",
+          "run402 deploy",
+        ],
+      },
+      null,
+      2,
+    ),
+  );
 }

@@ -21,7 +21,7 @@ import { reportSdkError, fail } from "./sdk-errors.mjs";
 const HELP = `run402 logs — Fetch function logs by request id
 
 Usage:
-  run402 logs --request-id <req_id> [--function <name>] [--project <id>] [--json] [--tail <n>]
+  run402 logs --request-id <req_id> [--function <name>] [--project <id>] [--tail <n>]
 
 Required:
   --request-id <req_id>   The req_... id (from x-run402-request-id header)
@@ -30,12 +30,14 @@ Optional:
   --function <name>       Limit to one function (default: scan all functions in the project)
   --project <id>          Project id (default: \$RUN402_PROJECT_ID)
   --tail <n>              Max entries per function (default 100)
-  --json                  Machine-readable output
+
+Output:
+  Stdout is JSON { ok, request_id, project_id, scanned, entries, errors? }.
 
 Examples:
   run402 logs --request-id req_abc123
   run402 logs --request-id req_abc123 --function ssr
-  run402 logs --request-id req_abc123 --project prj_xyz --json
+  run402 logs --request-id req_abc123 --project prj_xyz
 
 Tip: the request id appears in:
   - The 'x-run402-request-id' response header on every SSR response
@@ -50,7 +52,6 @@ export async function run(sub, args = []) {
     return;
   }
 
-  const json = all.includes("--json");
   const requestId = pickFlagValue(all, "--request-id");
   const fnName = pickFlagValue(all, "--function");
   const projectIdArg = pickFlagValue(all, "--project");
@@ -98,18 +99,19 @@ export async function run(sub, args = []) {
       const list = await sdk.functions.list(projectId);
       fnNames = (list?.functions ?? []).map((f) => f.name);
       if (fnNames.length === 0) {
-        if (json) console.log(JSON.stringify({ ok: true, entries: [], scanned: [] }));
-        else console.log("No functions in project " + projectId);
+        console.log(JSON.stringify({ ok: true, request_id: requestId, project_id: projectId, entries: [], scanned: [] }, null, 2));
         return;
       }
     }
 
-    // Query each function in parallel; aggregate entries.
+    // Query each function in parallel; aggregate entries. SDK returns
+    // FunctionLogsResult = { logs: FunctionLogEntry[] }; unwrap to the array
+    // so the aggregated JSON has a flat entries[] field.
     const results = await Promise.allSettled(
       fnNames.map((name) =>
         sdk.functions
           .logs(projectId, name, { requestId, tail })
-          .then((entries) => ({ name, entries: entries ?? [] })),
+          .then((result) => ({ name, entries: result?.logs ?? [] })),
       ),
     );
 
@@ -127,35 +129,28 @@ export async function run(sub, args = []) {
       }
     }
 
-    // Sort by timestamp ascending.
-    allEntries.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
+    // Sort by timestamp ascending. FunctionLogEntry.timestamp is an ISO 8601
+    // string; convert to epoch ms for comparison.
+    allEntries.sort((a, b) => {
+      const ta = a.timestamp ? Date.parse(a.timestamp) : 0;
+      const tb = b.timestamp ? Date.parse(b.timestamp) : 0;
+      return ta - tb;
+    });
 
-    if (json) {
-      console.log(
-        JSON.stringify(
-          {
-            ok: errors.length === 0,
-            request_id: requestId,
-            project_id: projectId,
-            scanned,
-            entries: allEntries,
-            ...(errors.length > 0 && { errors }),
-          },
-          null,
-          2,
-        ),
-      );
-    } else {
-      if (allEntries.length === 0) {
-        console.log(`No log entries found for ${requestId} across ${scanned.length} function(s).`);
-      } else {
-        for (const e of allEntries) {
-          const t = e.ts ? new Date(e.ts).toISOString() : "";
-          console.log(`[${t}] [${e.function}] ${e.message ?? ""}`);
-        }
-        console.log(`\n${allEntries.length} entries across ${scanned.length} function(s) for ${requestId}.`);
-      }
-    }
+    console.log(
+      JSON.stringify(
+        {
+          ok: errors.length === 0,
+          request_id: requestId,
+          project_id: projectId,
+          scanned,
+          entries: allEntries,
+          ...(errors.length > 0 && { errors }),
+        },
+        null,
+        2,
+      ),
+    );
   } catch (err) {
     reportSdkError(err);
   }

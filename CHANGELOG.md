@@ -2,6 +2,26 @@
 
 All notable changes to `@run402/sdk`, `run402` (CLI), and `run402-mcp`. Versions are kept in lockstep across the three packages in this repo. `@run402/functions` lives in the private gateway monorepo and publishes on its own cadence.
 
+## Unreleased — Pre-launch JSON-only cleanup, part 2 (6 commands)
+
+Follow-up to the 2.23.0 cleanup. Closes the remaining "text-by-default with `--json` opt-in" violations across 6 commands. Since there are no users yet, this is pre-launch cleanup shipped as a minor — no migration guidance needed. `@run402/sdk` and `run402-mcp` have **no code changes**.
+
+Affected commands (all now JSON-by-default; the `--json` flag is removed):
+
+- **`run402 cache inspect`** — stdout was a multi-line indented text report; now the JSON cache-row object.
+- **`run402 cache invalidate`** — stdout was `Invalidated N cache row(s) on HOST for PATH (generation: G)`; now `{ deleted, host?, path?, generation }`.
+- **`run402 doctor`** — stdout was a ✓/⚠/✗ checkmark report; now `{ ok, checks: [...] }` (the per-check `status` strings inside `checks[]` are payload data, not the forbidden top-level envelope).
+- **`run402 init`** (default rail setup) — stdout was a human banner; now the JSON summary (`{ config_dir, allowance, rail, network, balance, tier, projects_saved, next_step }`). Progress lines (`Config / Allowance / Balance / Tier / Next`) stay visible to humans — they go to stderr.
+- **`run402 init astro <dir>`** — stdout was `Scaffolded ... / Files created: / Next steps:` prose; now the JSON summary (`{ dir, files_created, created, next_steps }`). Progress lines moved to stderr.
+- **`run402 logs --request-id <req>`** — stdout was `[ts] [fn] msg` aggregated text lines + a footer; now the JSON envelope (`{ ok, request_id, project_id, scanned, entries, errors? }`).
+
+Drift-protection tests added in `cli-argv.test.mjs` suite "CLI JSON-only output contract (v3.x cleanup)" pin the new shapes.
+
+### Other fixes shipped in the same release
+
+- **Scaffold template fix**: `run402 init astro` was writing `src/pages/[slug].astro` with `import { db, getUser, cache } from "@run402/functions"`. Under `@run402/functions@3.0+`, the `getUser` bare export throws `R402_AUTH_UNKNOWN_EXPORT` at runtime — so the scaffolded template would fail the first time a user ran it. The template now imports only `db` (the `getUser` and `cache` imports were dead anyway — the template body didn't call them).
+- **`run402 logs` aggregated entries unwrap**: the SDK's `functions.logs(...)` returns `{ logs: FunctionLogEntry[] }`, but the aggregator in `cli/lib/logs.mjs` wasn't unwrapping `.logs` — meaning the emitted JSON had `entries[i]` as the wrapper `{ logs: [...] }` object instead of the actual log entry. Same place: the timestamp sort read `e.ts` (a key that doesn't exist on `FunctionLogEntry`), so entries were never sorted. Both surfaced when the new JSON-by-default contract was test-covered; both are fixed.
+
 ## Unreleased — CLI JSON-only output cleanup (breaking)
 
 Follow-up to 2.16.0: tightens the CLI's machine-readable contract by closing four "mixed-shape" violations of the JSON-only-by-default stance. `@run402/sdk` and `run402-mcp` have **no code changes**.

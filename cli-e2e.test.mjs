@@ -3870,10 +3870,10 @@ describe("CLI e2e happy path", () => {
     assert.ok(!/Projects\s+\d+\s+active/.test(out), `must not use the misleading "N active" wording, got: ${out}`);
   });
 
-  it("init --json emits JSON on stdout and human lines on stderr (GH-32)", async () => {
+  it("init emits JSON on stdout and human lines on stderr (GH-32)", async () => {
     const { run } = await import("./cli/lib/init.mjs");
     captureStart();
-    await run(["--json"]);
+    await run([]);
     captureStop();
     const stdout = capturedStdout();
     const stderr = capturedStderr();
@@ -4049,15 +4049,15 @@ describe("CLI e2e happy path", () => {
     assert.equal(allowance.rail, "mpp", "rail should be mpp");
   });
 
-  // GH-81: after MPP faucet succeeds, `--json` summary must reflect funded=true
+  // GH-81: after MPP faucet succeeds, the JSON summary must reflect funded=true
   // and the polled balance. Previously `summary.allowance` was captured before
   // the faucet branch ran, so the JSON reported `funded: false` and
   // `usd_micros: 0` even when the human-readable lines said "funded".
-  it("init mpp --json reports funded=true after faucet settles (GH-81)", async () => {
+  it("init mpp reports funded=true after faucet settles (GH-81)", async () => {
     tempoRpcCallCount = 0; // first eth_call returns 0 → triggers faucet path
     const { run } = await import("./cli/lib/init.mjs");
     captureStart();
-    await run(["mpp", "--json", "--switch-rail"]);
+    await run(["mpp", "--switch-rail"]);
     captureStop();
     const stdout = capturedStdout();
     const parsed = JSON.parse(stdout);

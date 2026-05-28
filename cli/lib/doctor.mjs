@@ -23,10 +23,12 @@ import {
 const HELP = `run402 doctor — Health and config diagnostics
 
 Usage:
-  run402 doctor [--json] [--verbose]
+  run402 doctor [--verbose] [--no-scan] [--scan-dir <D>]
+
+Output:
+  Stdout is a JSON report { ok, checks: [{ name, status, value?, hint?, message? }] }.
 
 Options:
-  --json         Emit a structured JSON report on stdout
   --verbose      Include extra detail (timing, error messages)
   --no-scan      Skip the source-tree scan (config / health checks only)
   --scan-dir D   Scan a custom directory instead of \`<cwd>/src\`
@@ -54,7 +56,6 @@ export async function run(sub, args = []) {
     console.log(HELP);
     return;
   }
-  const json = all.includes("--json");
   const verbose = all.includes("--verbose");
   const skipScan = all.includes("--no-scan");
   const scanDirArgIdx = all.indexOf("--scan-dir");
@@ -280,38 +281,6 @@ export async function run(sub, args = []) {
   // 'empty' fail.
   const allOk = checks.every((c) => c.status === "ok" || c.status === "warning" || c.status === "skipped");
 
-  if (json) {
-    console.log(JSON.stringify({ ok: allOk, checks }, null, 2));
-  } else {
-    console.log(`Run402 doctor — ${allOk ? "all checks passed" : "issues found"}`);
-    console.log("");
-    for (const c of checks) {
-      const icon =
-        c.status === "ok" ? "✓"
-        : c.status === "warning" ? "⚠"
-        : c.status === "skipped" ? "·"
-        : c.status === "missing" || c.status === "empty" ? "⚠"
-        : "✗";
-      const status = c.status === "ok" ? "ok" : c.status;
-      console.log(`  ${icon} ${c.name.padEnd(16)} ${status}`);
-      if (c.hint) console.log(`     → ${c.hint}`);
-      if (c.message) console.log(`     ${c.message}`);
-      if (c.value && c.value.gaps && Array.isArray(c.value.gaps)) {
-        for (const gap of c.value.gaps) console.log(`     • ${gap}`);
-      }
-      // Source-scan details — print every finding with file:line + canonical fix-it.
-      if (c.name === "source_scan" && c.value && Array.isArray(c.value.details)) {
-        for (const f of c.value.details) {
-          const sev = f.severity === "error" ? "✗" : "⚠";
-          const location = f.line ? `${f.file}:${f.line}` : f.file;
-          console.log(`     ${sev} ${f.code} ${location}`);
-          console.log(`         ${f.message}`);
-          if (f.canonical_name) console.log(`         fix: ${f.canonical_name}`);
-          if (f.docs) console.log(`         docs: ${f.docs}`);
-        }
-      }
-    }
-  }
-
+  console.log(JSON.stringify({ ok: allOk, checks }, null, 2));
   process.exit(allOk ? 0 : 1);
 }

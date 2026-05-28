@@ -56,15 +56,18 @@ Subcommands:
   invalidate --all --host <h>          Invalidate all rows for a host
 
 Common flags:
-  --json                       Machine-readable output
   --locale <code>              (inspect only) Inspect a specific locale's row
                                (default: project's default locale)
   --release-id <id>            (inspect only) Inspect a specific release id
                                (default: project's active release)
 
+Output:
+  Stdout is JSON. inspect emits the cache row object; invalidate emits
+  { deleted, host?, path?, generation }.
+
 Examples:
   run402 cache inspect https://eagles.kychon.com/the-guys
-  run402 cache inspect https://eagles.kychon.com/the-guys --locale es --json
+  run402 cache inspect https://eagles.kychon.com/the-guys --locale es
   run402 cache invalidate https://eagles.kychon.com/the-guys
   run402 cache invalidate --prefix /blog/ --host eagles.kychon.com
   run402 cache invalidate --all --host eagles.kychon.com
@@ -105,7 +108,7 @@ export async function run(sub, args) {
 
 async function inspect(args) {
   const parsed = normalizeArgv(args);
-  assertKnownFlags(parsed, ["--json", "--locale", "--release-id", "--help", "-h"]);
+  assertKnownFlags(parsed, ["--locale", "--release-id", "--help", "-h"]);
   if (hasFlag(parsed, ["--help", "-h"])) {
     console.log(HELP);
     return;
@@ -130,19 +133,11 @@ async function inspect(args) {
 
   const locale = flagValue(parsed, "--locale");
   const releaseId = flagValue(parsed, "--release-id");
-  const json = hasFlag(parsed, ["--json"]);
 
   try {
     const sdk = getSdk();
-    // SDK shape — the gateway's cache inspect endpoint isn't yet wired
-    // (separate task). For now the CLI POSTs to the same /cache/v1/
-    // namespace with kind=inspect.
     const result = await sdk.cache.inspect(url, { locale, releaseId });
-    if (json) {
-      console.log(JSON.stringify(result, null, 2));
-    } else {
-      console.log(formatInspectResult(result));
-    }
+    console.log(JSON.stringify(result, null, 2));
   } catch (err) {
     reportSdkError(err);
   }
@@ -150,14 +145,13 @@ async function inspect(args) {
 
 async function invalidate(args) {
   const parsed = normalizeArgv(args);
-  assertKnownFlags(parsed, ["--json", "--prefix", "--host", "--all", "--help", "-h"]);
+  assertKnownFlags(parsed, ["--prefix", "--host", "--all", "--help", "-h"]);
   if (hasFlag(parsed, ["--help", "-h"])) {
     console.log(HELP);
     return;
   }
 
   const positionals = positionalArgs(parsed);
-  const json = hasFlag(parsed, ["--json"]);
   const prefix = flagValue(parsed, "--prefix");
   const host = flagValue(parsed, "--host");
   const all = hasFlag(parsed, ["--all"]);
@@ -175,7 +169,7 @@ async function invalidate(args) {
     }
     try {
       const result = await sdk.cache.invalidateAll({ host });
-      emit(result, json);
+      console.log(JSON.stringify(result, null, 2));
     } catch (err) {
       reportSdkError(err);
     }
@@ -198,7 +192,7 @@ async function invalidate(args) {
     }
     try {
       const result = await sdk.cache.invalidatePrefix({ host, prefix });
-      emit(result, json);
+      console.log(JSON.stringify(result, null, 2));
     } catch (err) {
       reportSdkError(err);
     }
@@ -227,38 +221,8 @@ async function invalidate(args) {
   }
   try {
     const result = await sdk.cache.invalidate(url);
-    emit(result, json);
+    console.log(JSON.stringify(result, null, 2));
   } catch (err) {
     reportSdkError(err);
   }
-}
-
-function emit(result, json) {
-  if (json) {
-    console.log(JSON.stringify(result, null, 2));
-  } else {
-    const parts = [`Invalidated ${result.deleted} cache row(s)`];
-    if (result.host) parts.push(`on ${result.host}`);
-    if (result.path) parts.push(`for ${result.path}`);
-    parts.push(`(generation: ${result.generation})`);
-    console.log(parts.join(" "));
-  }
-}
-
-function formatInspectResult(result) {
-  if (result.status === "MISS") {
-    return `MISS — no cache row for ${result.url || "this URL"}.`;
-  }
-  const lines = [
-    `${result.status} — ${result.host}${result.path}`,
-    `  locale:           ${result.locale}`,
-    `  releaseId:        ${result.releaseId}`,
-    `  cachedAt:         ${result.cachedAt}`,
-    `  expiresAt:        ${result.expiresAt}`,
-    `  contentSha256:    ${result.contentSha256}`,
-  ];
-  if (result.writtenUnderGeneration) {
-    lines.push(`  writtenUnderGen:  ${result.writtenUnderGeneration}`);
-  }
-  return lines.join("\n");
 }

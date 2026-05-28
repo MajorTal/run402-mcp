@@ -18,14 +18,17 @@ Usage:
                              Required when an allowance already exists on
                              the other rail; protects scripted re-runs from
                              silently flipping billing networks.
-  run402 init --json         Same as init, but emit a JSON summary on stdout
-                             (human lines go to stderr — for agent automation)
 
 Options:
   --switch-rail   Confirm switching the persisted payment rail. Re-running
                   init with the SAME rail as the existing allowance is always
                   idempotent and does not need this flag.
-  --json          Emit a structured JSON summary on stdout.
+
+Output:
+  Stdout is a JSON summary { config_dir, allowance, rail, network, balance,
+  tier, projects_saved, next_step }. Progress lines (Config / Allowance /
+  Balance / Tier / Next) go to stderr so a human re-running interactively
+  sees what's happening while a script piping stdout to jq stays clean.
 
 Steps (idempotent when re-run with the same rail; pass --switch-rail to change rails):
   1. Creates config directory (~/.config/run402)
@@ -61,7 +64,6 @@ export async function run(args = []) {
 
   if (args.includes("--help") || args.includes("-h")) { console.log(HELP); process.exit(0); }
 
-  const jsonMode = args.includes("--json");
   const isMpp = args[0] === "mpp";
   const requestedRail = isMpp ? "mpp" : "x402";
   const switchRailConfirmed = args.includes("--switch-rail");
@@ -75,9 +77,9 @@ export async function run(args = []) {
     });
   }
 
-  // In --json mode, human-readable lines go to stderr so stdout stays clean for
-  // agents. We also collect structured data for the final JSON emit.
-  const write = jsonMode ? (s) => console.error(s) : (s) => console.log(s);
+  // Human-readable progress lines go to stderr so stdout stays JSON-clean for
+  // agents. Final structured summary emits to stdout at the end.
+  const write = (s) => console.error(s);
   const line = (label, value) => write(`  ${label.padEnd(10)} ${value}`);
   const summary = {
     config_dir: CONFIG_DIR,
@@ -265,7 +267,5 @@ export async function run(args = []) {
   write("");
   summary.next_step = nextStep;
 
-  if (jsonMode) {
-    console.log(JSON.stringify(summary, null, 2));
-  }
+  console.log(JSON.stringify(summary, null, 2));
 }

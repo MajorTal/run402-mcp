@@ -1333,17 +1333,17 @@ Public service-level status. No allowance, no auth, no keystore required — wor
 ### cache
 SSR origin-cache inspection + invalidation. Capability `ssr-isr-cache` (gateway v1.52+, paired with `@run402/astro` v1.0+). Cache is scoped per-project; cross-project hosts return `R402_CACHE_INVALIDATION_HOST_FORBIDDEN`.
 
-- `run402 cache inspect <url> [--locale <code>] [--release-id <id>] [--json]` — read the cache row state for a URL. Returns `{ status: "HIT" | "MISS", host, path, locale, releaseId, cachedAt, expiresAt, writtenUnderGeneration, contentSha256, headers }`. `status` is NEVER `BYPASS` — inspect does not issue a request, so it cannot evaluate runtime bypass conditions. Defaults to active release + default locale; pass `--locale` / `--release-id` to inspect non-default rows.
-- `run402 cache invalidate <url> [--json]` — invalidate a single absolute URL.
-- `run402 cache invalidate --prefix <p> --host <h> [--json]` — invalidate all rows under a path prefix on a specific host.
-- `run402 cache invalidate --all --host <h> [--json]` — entire-host purge (catastrophic content changes; nav restructure; layout-wide updates).
+- `run402 cache inspect <url> [--locale <code>] [--release-id <id>]` — read the cache row state for a URL. Stdout is JSON: `{ status: "HIT" | "MISS", host, path, locale, releaseId, cachedAt, expiresAt, writtenUnderGeneration, contentSha256, headers }`. `status` is NEVER `BYPASS` — inspect does not issue a request, so it cannot evaluate runtime bypass conditions. Defaults to active release + default locale; pass `--locale` / `--release-id` to inspect non-default rows. (The legacy `--json` flag is removed — JSON is the default.)
+- `run402 cache invalidate <url>` — invalidate a single absolute URL. Stdout: `{ deleted, host, path, generation }`.
+- `run402 cache invalidate --prefix <p> --host <h>` — invalidate all rows under a path prefix on a specific host.
+- `run402 cache invalidate --all --host <h>` — entire-host purge (catastrophic content changes; nav restructure; layout-wide updates).
 
 Every invalidate returns `{ deleted, generation, host, path? }`. `generation` is the post-increment per-(project, host) counter — it gates in-flight MISS renders from overwriting after invalidation completed.
 
 ### doctor
 Health + config diagnostics. Agent-DX entrypoint — agents run this first to verify environment before attempting anything else.
 
-- `run402 doctor [--json] [--verbose] [--no-scan] [--scan-dir <D>]` — checks: config dir presence, allowance + rail, keystore wallet count, API base reachability, active tier + lifecycle state, operator health snapshot (binding state + per-attempt verification failure detail since v2.4 / gateway v1.56), **source scan** (auth-aware-ssr). Exit 0 on all-pass, 1 on any failure. `--json` emits `{ ok: boolean, checks: [{ name, status, value?, hint?, message? }] }`. When operator email verification is `pending`, the doctor surfaces the per-reason hint from `email_verification.last_challenge.hint` along with `attempt_count` / `remaining_attempts` so the operator sees what to fix. The source scan walks `<cwd>/src` and flags hallucinated SDK auth names (`R402_AUTH_UNKNOWN_EXPORT`), state-changing GET handlers (`R402_AUTH_STATE_CHANGING_GET`), `auth.*` calls in `export const prerender = true` pages (`R402_AUTH_PRERENDERED`), and direct mutation of `internal.sessions.authz_version` (`R402_AUTH_AUTHZ_VERSION_PROHIBITED`). `--no-scan` skips the scan (config-only checks). `--scan-dir <D>` overrides the scan root. `run402 deploy apply` runs the scan as pre-flight and refuses to deploy on any `error`-severity finding (bypass with `RUN402_DEPLOY_SKIP_SCAN=1`).
+- `run402 doctor [--verbose] [--no-scan] [--scan-dir <D>]` — checks: config dir presence, allowance + rail, keystore wallet count, API base reachability, active tier + lifecycle state, operator health snapshot (binding state + per-attempt verification failure detail since v2.4 / gateway v1.56), **source scan** (auth-aware-ssr). Exit 0 on all-pass, 1 on any failure. Stdout is JSON `{ ok: boolean, checks: [{ name, status, value?, hint?, message? }] }`. When operator email verification is `pending`, the doctor surfaces the per-reason hint from `email_verification.last_challenge.hint` along with `attempt_count` / `remaining_attempts` so the operator sees what to fix. The source scan walks `<cwd>/src` and flags hallucinated SDK auth names (`R402_AUTH_UNKNOWN_EXPORT`), state-changing GET handlers (`R402_AUTH_STATE_CHANGING_GET`), `auth.*` calls in `export const prerender = true` pages (`R402_AUTH_PRERENDERED`), and direct mutation of `internal.sessions.authz_version` (`R402_AUTH_AUTHZ_VERSION_PROHIBITED`). `--no-scan` skips the scan (config-only checks). `--scan-dir <D>` overrides the scan root. `run402 deploy apply` runs the scan as pre-flight and refuses to deploy on any `error`-severity finding (bypass with `RUN402_DEPLOY_SKIP_SCAN=1`). (The legacy `--json` flag is removed — JSON is the default.)
 
 ### dev
 Astro dev wrapper. Loads `.env.local`, verifies `RUN402_PROJECT_ID` + `RUN402_SERVICE_KEY`, then spawns `astro dev` with the env inherited.
@@ -1355,12 +1355,12 @@ SDK calls (`db`, `getUser`, `cache.invalidate`, `assets.put`) hit the LIVE Run40
 ### init astro
 Project scaffolder. Subroute of `init` (alongside `init` rail setup).
 
-- `run402 init astro [<dir>] [--force] [--json]` — creates a deployable Astro project with `package.json` (dev/deploy scripts), `astro.config.mjs` (one-line `@run402/astro` preset), `src/pages/{index,[slug]}.astro` (the latter demonstrates the full DB-backed dynamic page pattern with cache directive), `src/layouts/Layout.astro` (title + og + canonical), `src/pages/api/save-page.ts` (admin save endpoint with `db().upsert() → cache.invalidate()`), `.env.example`, `.gitignore`. Refuses non-empty dirs without `--force`.
+- `run402 init astro [<dir>] [--force]` — creates a deployable Astro project with `package.json` (dev/deploy scripts), `astro.config.mjs` (one-line `@run402/astro` preset), `src/pages/{index,[slug]}.astro` (the latter demonstrates the full DB-backed dynamic page pattern with cache directive), `src/layouts/Layout.astro` (title + og + canonical), `src/pages/api/save-page.ts` (admin save endpoint with `db().upsert() → cache.invalidate()`), `.env.example`, `.gitignore`. Refuses non-empty dirs without `--force`. Stdout is JSON `{ dir, files_created, created, next_steps }`; progress lines go to stderr. (The legacy `--json` flag is removed — JSON is the default.)
 
 ### logs
 Fetch function logs by request id. Top-level shortcut — for fine-grained per-function control, `run402 functions logs <project> <name>` still works.
 
-- `run402 logs --request-id <req_...> [--function <name>] [--project <id>] [--tail <n>] [--json]`
+- `run402 logs --request-id <req_...> [--function <name>] [--project <id>] [--tail <n>]` — stdout is JSON `{ ok, request_id, project_id, scanned, entries, errors? }`. (The legacy `--json` flag is removed — JSON is the default.)
 
 When an SSR response returns a 5xx, the response headers include `x-run402-error-code: R402_SSR_RUNTIME_ERROR` and `x-run402-request-id: req_...`. Copy the request id and run `run402 logs --request-id req_...` to fetch the full stack trace. Scans every function in the project in parallel and aggregates entries timestamp-ascending unless `--function` narrows the scope.
 
