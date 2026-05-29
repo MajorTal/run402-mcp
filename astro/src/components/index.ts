@@ -46,6 +46,13 @@ export { default as SignedIn } from "./SignedIn.astro";
 // @ts-expect-error — .astro file, see Run402Picture comment.
 export { default as SignedOut } from "./SignedOut.astro";
 
+// auth-hosted-surface-parity §4.2 — the component-first account-security
+// panel. Renders plain-HTML forms POSTing to the hosted /auth/account/*
+// routes (password / passkeys / sessions / identities), CSRF via the
+// gateway-verified double-submit token. Reads auth.account.getSecurity().
+// @ts-expect-error — .astro file, see Run402Picture comment.
+export { default as AccountSecurity } from "./AccountSecurity.astro";
+
 // Re-export the prop interface + AssetRef shape + error class so
 // consumers can compose project-specific wrappers (e.g., a `<HeroImage>`
 // that wraps `<Run402Image>` with project-default `sizes`) without

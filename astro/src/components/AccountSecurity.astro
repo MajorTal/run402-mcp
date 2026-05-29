@@ -1,0 +1,223 @@
+---
+/**
+ * `<AccountSecurity />` — the component-first account-security panel
+ * (auth-hosted-surface-parity §4.2). Renders, per requested section, plain
+ * HTML forms that POST to the platform-hosted `/auth/account/*` routes. No
+ * client JavaScript for the password / session-revoke / passkey-remove /
+ * identity-unlink flows — CSRF is the gateway-verified double-submit token
+ * (the same mechanism `<UserButton />` uses). The gateway enforces freshness,
+ * session rotation, and host-gating server-side.
+ *
+ * Sections (rendered in the order requested via `sections`):
+ *   - "password"   — set or change the Run402 password. Freshness-gated
+ *                    server-side (recent re-auth required); the route
+ *                    rotates other sessions on success.
+ *   - "passkeys"   — show the registered-passkey count + remove one. ADD
+ *                    links to the hosted passkey-register ceremony (the
+ *                    browser WebAuthn `navigator.credentials` call lives on
+ *                    the hosted page, not in this server-rendered form).
+ *   - "sessions"   — revoke a single browser session or sign out everywhere.
+ *   - "identities" — list linked OAuth identities + unlink. LINK uses the
+ *                    hosted OAuth start route (the §4.5 startLink redirect).
+ *
+ * Reads `auth.account.getSecurity()` for the ownership-qualified state
+ * (`has_run402_password`, `run402_passkey_count`, `run402_identities`, …)
+ * and `auth.csrfToken()` for the double-submit token. Anonymous visitors
+ * render nothing — gate the parent surface on `<SignedIn>`.
+ *
+ * Capability `auth-hosted-surface-parity` / spec `hosted-auth-ui`.
+ *
+ * Usage:
+ *   ```astro
+ *   ---
+ *   import { AccountSecurity } from "@run402/astro/components";
+ *   ---
+ *   <AccountSecurity sections={["password", "sessions"]} />
+ *   ```
+ */
+
+// @ts-ignore — `@run402/functions`' `auth` namespace is resolved at
+// build/runtime in the consumer's Astro project (the Vite plugin handles
+// the dependency); the package itself does not type-check `.astro` files.
+import { auth } from "@run402/functions";
+
+type Section = "password" | "passkeys" | "sessions" | "identities";
+
+interface Props {
+  /** Which panels to render, in this order. Default: all four. */
+  sections?: Section[];
+  /** Extra class on the wrapper. */
+  class?: string;
+}
+
+const {
+  sections = ["password", "passkeys", "sessions", "identities"],
+  class: className = "",
+} = Astro.props;
+
+// getSecurity() returns the rich ownership-qualified read (or null when
+// anonymous) and triggers the cache-bypass taint, so the rendered HTML is
+// correctly marked non-cacheable.
+const security = await auth.account.getSecurity();
+
+let csrfToken: string | null = null;
+try {
+  csrfToken = security ? auth.csrfToken() : null;
+} catch {
+  // Session vanished between getSecurity() and the token derivation — render
+  // nothing; the next request sees anonymous state.
+  csrfToken = null;
+}
+
+const show = (s: Section): boolean =>
+  security !== null && csrfToken !== null && sections.includes(s);
+---
+
+{security && csrfToken && (
+  <div class={`r402-account-security ${className}`.trim()} data-r402-account-security>
+    {show("password") && (
+      <section class="r402-as-section" data-section="password">
+        <h3>{security.has_run402_password ? "Change password" : "Set a password"}</h3>
+        <form method="POST" action="/auth/account/password" class="r402-as-form">
+          <input type="hidden" name="_csrf" value={csrfToken} />
+          {security.has_run402_password && (
+            <label>
+              Current password
+              <input type="password" name="current_password" autocomplete="current-password" required />
+            </label>
+          )}
+          <label>
+            New password
+            <input type="password" name="new_password" autocomplete="new-password" required minlength={8} />
+          </label>
+          <button type="submit">
+            {security.has_run402_password ? "Update password" : "Set password"}
+          </button>
+        </form>
+        <p class="r402-as-hint">Recent re-authentication may be required.</p>
+      </section>
+    )}
+
+    {show("passkeys") && (
+      <section class="r402-as-section" data-section="passkeys">
+        <h3>Passkeys</h3>
+        <p>
+          {security.run402_passkey_count} passkey{security.run402_passkey_count === 1 ? "" : "s"} registered
+          {security.has_run402_passkey_for_current_rp ? " (including one for this site)" : ""}.
+        </p>
+        <a class="r402-as-link" href="/auth/passkeys/register">Add a passkey</a>
+        {security.run402_passkey_count > 0 && (
+          <form method="POST" action="/auth/account/passkeys/remove" class="r402-as-form">
+            <input type="hidden" name="_csrf" value={csrfToken} />
+            <label>
+              Passkey credential id
+              <input type="text" name="credential_id" required />
+            </label>
+            <button type="submit">Remove passkey</button>
+          </form>
+        )}
+      </section>
+    )}
+
+    {show("sessions") && (
+      <section class="r402-as-section" data-section="sessions">
+        <h3>Active sessions</h3>
+        <form method="POST" action="/auth/account/sessions/revoke" class="r402-as-form">
+          <input type="hidden" name="_csrf" value={csrfToken} />
+          <label>
+            Session id
+            <input type="text" name="session_id" required />
+          </label>
+          <button type="submit">Revoke session</button>
+        </form>
+        <form method="POST" action="/auth/account/sign-out-everywhere" class="r402-as-form">
+          <input type="hidden" name="_csrf" value={csrfToken} />
+          <button type="submit" class="r402-as-danger">Sign out everywhere</button>
+        </form>
+      </section>
+    )}
+
+    {show("identities") && (
+      <section class="r402-as-section" data-section="identities">
+        <h3>Connected accounts</h3>
+        {security.run402_identities.length === 0 ? (
+          <p>No connected accounts.</p>
+        ) : (
+          <ul class="r402-as-identities">
+            {security.run402_identities.map((id: { provider: string; provider_sub: string; provider_email: string | null }) => (
+              <li>
+                <span>{id.provider}{id.provider_email ? ` — ${id.provider_email}` : ""}</span>
+                <form method="POST" action="/auth/account/identities/unlink" class="r402-as-inline">
+                  <input type="hidden" name="_csrf" value={csrfToken} />
+                  <input type="hidden" name="provider" value={id.provider} />
+                  <input type="hidden" name="provider_sub" value={id.provider_sub} />
+                  <button type="submit">Unlink</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        )}
+        <a class="r402-as-link" href="/auth/sign-in/oauth/google/start?intent=link">Connect Google</a>
+      </section>
+    )}
+  </div>
+)}
+
+<style>
+  .r402-account-security {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+  .r402-as-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .r402-as-section h3 {
+    margin: 0;
+    font-size: 1rem;
+  }
+  .r402-as-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-width: 24rem;
+    margin: 0;
+  }
+  .r402-as-form label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    font-size: 0.875rem;
+  }
+  .r402-as-inline {
+    display: inline;
+    margin: 0;
+  }
+  .r402-as-identities {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .r402-as-identities li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .r402-as-hint {
+    margin: 0;
+    font-size: 0.75rem;
+    color: var(--r402-as-hint-fg, #777);
+  }
+  .r402-as-danger {
+    color: var(--r402-as-danger-fg, #b00020);
+  }
+  .r402-as-link {
+    font-size: 0.875rem;
+  }
+</style>
