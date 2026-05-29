@@ -264,6 +264,9 @@ const { user, role } = await auth.requireRole("admin");
 const { user, membership } = await auth.requireMembership("member");
 await auth.requireFresh({ maxAge: "10m", amr: ["passkey"] });
 
+// Rich, ownership-qualified account-security read (backs <AccountSecurity>):
+const sec = await auth.account.getSecurity();  // AccountSecurity | null
+
 // CSRF for hosted forms (server-side, in <form> rendering):
 const field = auth.csrfField();
 // → <input type="hidden" name="_csrf" value="..." />
@@ -301,7 +304,7 @@ routes (\`/auth/v1/sign-in\` etc.) with the CSRF token already wired:
 
 \`\`\`astro
 ---
-import { SignIn, SignUp, UserButton, SignedIn, SignedOut } from "@run402/astro";
+import { SignIn, SignUp, UserButton, AccountSecurity, SignedIn, SignedOut } from "@run402/astro";
 ---
 
 <SignedIn>
@@ -310,10 +313,21 @@ import { SignIn, SignUp, UserButton, SignedIn, SignedOut } from "@run402/astro";
 <SignedOut>
   <SignIn returnTo="/dashboard" />
 </SignedOut>
+
+<!-- On an account page (gate on <SignedIn>): change password, manage
+     passkeys, list/revoke sessions, sign out everywhere, link/unlink OAuth. -->
+<SignedIn>
+  <AccountSecurity sections={["password", "passkeys", "sessions", "identities"]} />
+</SignedIn>
 \`\`\`
 
-Do NOT roll your own sign-in form. The hosted routes handle CSRF, returnTo
-validation, OAuth provider bridges, and passkey ceremonies.
+The four hosted-auth components — \`<SignIn>\`, \`<SignUp>\`, \`<UserButton>\`,
+\`<AccountSecurity>\` — plus the \`<SignedIn>\`/\`<SignedOut>\` gates emit forms
+posting to the platform's hosted routes with the CSRF token already wired.
+Each accepts a default \`<slot>\` for extras (OAuth buttons, links, panels)
+without losing the zero-config default. Do NOT roll your own — the hosted
+routes handle CSRF, returnTo validation, OAuth provider bridges, and passkey
+ceremonies.
 
 ## Rendering-mode quick map
 
