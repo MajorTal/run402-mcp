@@ -205,6 +205,11 @@ function addCodeGuidance(lines: string[], code: string | undefined): boolean {
         `\nNext step: The project has a pending transfer; owner-side mutations are blocked until it is accepted, cancelled, or expires (72h). Use \`cancel_project_transfer\` to cancel it or \`preview_project_transfer\` to view it. The transfer id is in \`details.transfer_id\`.`,
       );
       return true;
+    case "CANNOT_REBUILD_UNLOCKED_DEPS":
+      lines.push(
+        `\nNext step: This function was deployed before dependency locking and can't be rebuilt deterministically. Redeploy it from source with \`deploy_function\` to refresh its runtime.`,
+      );
+      return true;
     default:
       return false;
   }

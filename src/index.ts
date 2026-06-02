@@ -66,6 +66,7 @@ import { blobWaitFreshSchema, handleBlobWaitFresh } from "./tools/assets-wait-fr
 import { listFunctionsSchema, handleListFunctions } from "./tools/list-functions.js";
 import { deleteFunctionSchema, handleDeleteFunction } from "./tools/delete-function.js";
 import { updateFunctionSchema, handleUpdateFunction } from "./tools/update-function.js";
+import { functionsRebuildSchema, handleFunctionsRebuild } from "./tools/functions-rebuild.js";
 import { listSecretsSchema, handleListSecrets } from "./tools/list-secrets.js";
 import { deleteSecretSchema, handleDeleteSecret } from "./tools/delete-secret.js";
 import {
@@ -397,6 +398,13 @@ server.tool(
   "Update a function's schedule, timeout, or memory without re-deploying code. Pass schedule as a cron expression to set/update, or null to remove.",
   updateFunctionSchema,
   async (args) => handleUpdateFunction(args),
+);
+
+server.tool(
+  "functions_rebuild",
+  "Refresh function(s) onto the platform's current entry wrapper + bundled runtime WITHOUT changing source (capability function-runtime-rebuild, gateway v1.69+). Provide `name` to rebuild one function, or omit it to rebuild every function in the project. Re-bundles from each function's STORED source with deps pinned to the recorded exact versions, so the source `code_hash` is unchanged and no new release is created — this is how a gateway-side wrapper fix (e.g. an SSR auth.* fix) reaches an already-deployed function (a plain redeploy with unchanged source does NOT pick it up). Strictly opt-in; the platform never auto-rebuilds. Wallet-authed (project ownership; no service key) and allowed during billing grace. Functions deployed before dependency locking return CANNOT_REBUILD_UNLOCKED_DEPS — redeploy them from source with `deploy_function`. Use `list_functions` (runtime_stale) or `run402 doctor` to find stale functions.",
+  functionsRebuildSchema,
+  async (args) => handleFunctionsRebuild(args),
 );
 
 // ─── Secrets tools ──────────────────────────────────────────────────────────

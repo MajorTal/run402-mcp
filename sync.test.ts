@@ -221,8 +221,9 @@ const SURFACE: Capability[] = [
   // function-runtime-rebuild (v1.69): opt-in refresh onto the current platform
   // runtime. The CLI `functions rebuild [name] [--all]` collapses the single
   // (`:name/rebuild`) and project-wide (`/rebuild`) endpoints into one verb;
-  // the batch SDK method is in SDK_ONLY_METHODS. MCP tool deferred (gh#416).
-  { id: "rebuild_function",  endpoint: "POST /projects/v1/:id/functions/:name/rebuild",     mcp: null,                cli: "functions:rebuild", openclaw: "functions:rebuild" },
+  // the batch SDK method is in SDK_ONLY_METHODS. MCP tool `functions_rebuild`
+  // (name → single, omitted → batch) landed the deferred gh#416 follow-up.
+  { id: "rebuild_function",  endpoint: "POST /projects/v1/:id/functions/:name/rebuild",     mcp: "functions_rebuild", cli: "functions:rebuild", openclaw: "functions:rebuild" },
 
   // ── Secrets ──────────────────────────────────────────────────────────────
   { id: "set_secret",        endpoint: "POST /projects/v1/admin/:id/secrets",        mcp: "set_secret",    cli: "secrets:set",    openclaw: "secrets:set" },
@@ -906,8 +907,8 @@ describe("SDK surface alignment", () => {
       "wallets.setLabel",
       // ─── function-runtime-rebuild (v1.69) — project-wide variant ──────────
       // `functions.rebuild` (single) is the canonical capability; `rebuildAll`
-      // shares the `run402 functions rebuild --all` CLI verb (and the deferred
-      // `functions_rebuild` MCP tool), so it has no dedicated leaf command.
+      // shares the `run402 functions rebuild --all` CLI verb (and the
+      // name-less `functions_rebuild` MCP tool), so it has no dedicated leaf command.
       "functions.rebuildAll",
     ]);
 

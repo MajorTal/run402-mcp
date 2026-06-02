@@ -293,6 +293,26 @@ describe("formatApiError", () => {
     assert.ok(text.includes("reserved"));
     assert.ok(!text.includes("lease may have expired"));
   });
+
+  it("maps 409 CANNOT_REBUILD_UNLOCKED_DEPS to redeploy-from-source guidance, not the generic reserved-name text", () => {
+    const result = formatApiError(
+      {
+        status: 409,
+        body: {
+          error: "Function was deployed before dependency locking.",
+          code: "CANNOT_REBUILD_UNLOCKED_DEPS",
+        },
+      },
+      "rebuilding function",
+    );
+    const text = result.content[0]!.text;
+    assert.ok(text.includes("409"));
+    assert.ok(text.includes("Code: `CANNOT_REBUILD_UNLOCKED_DEPS`"));
+    assert.ok(/redeploy/i.test(text));
+    assert.ok(text.includes("deploy_function"));
+    // code-specific guidance suppresses the misleading generic 409 message
+    assert.ok(!text.includes("already in use or reserved"));
+  });
 });
 
 describe("projectNotFound", () => {
