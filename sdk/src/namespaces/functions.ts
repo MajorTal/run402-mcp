@@ -2,7 +2,9 @@
  * `functions` namespace — serverless function lifecycle.
  *
  * Covers deploy/invoke/logs/list/delete/update against
- * `/projects/v1/admin/:id/functions*` and `/functions/v1/:name`.
+ * `/projects/v1/admin/:id/functions*` and `/functions/v1/:name`, plus the
+ * opt-in runtime rebuild/rebuildAll against `/projects/v1/:id/functions*`
+ * (wallet-authed, capability `function-runtime-rebuild`).
  */
 
 import type { Client } from "../kernel.js";
@@ -16,6 +18,8 @@ import type {
   FunctionListResult,
   FunctionLogsOptions,
   FunctionLogsResult,
+  FunctionRebuildBatchResult,
+  FunctionRebuildResult,
   FunctionUpdateOptions,
   FunctionUpdateResult,
 } from "./functions.types.js";
@@ -224,6 +228,64 @@ export class Functions {
         headers: { Authorization: `Bearer ${project.service_key}` },
         body,
         context: "updating function",
+      },
+    );
+  }
+
+  /**
+   * Refresh a single runtime-stale function onto the gateway's current entry
+   * wrapper + bundled runtime, WITHOUT changing its source (capability
+   * `function-runtime-rebuild`, gateway v1.69+).
+   *
+   * A gateway-side fix to the function entry wrapper (e.g. the SSR `auth.*`
+   * fixes) only reaches a deployed function when it is re-bundled — a plain
+   * redeploy with unchanged source skips it (apply's release diff keys on the
+   * source `code_hash`, not the wrapper). This re-bundles from the function's
+   * STORED source with dependencies pinned to the recorded `deps_resolved`
+   * exact versions, so the only change is the wrapper/runtime: `code_hash` is
+   * unchanged and no new release is created. Strictly opt-in — the platform
+   * never auto-rebuilds.
+   *
+   * Wallet-authed (the caller must own the project) and allowed during billing
+   * grace (`past_due` / `frozen` / `dormant`); it adds no capacity. No service
+   * key is required — the gateway derives it from the wallet-owned project.
+   *
+   * @throws {ApiError} HTTP 404 when the function does not exist; HTTP 403 when
+   *   the wallet does not own the project; HTTP 409 with code
+   *   `CANNOT_REBUILD_UNLOCKED_DEPS` for functions deployed before dependency
+   *   locking (`deps_resolved` is NULL) — redeploy from source to refresh.
+   */
+  async rebuild(projectId: string, name: string): Promise<FunctionRebuildResult> {
+    validateFunctionName(name, "name", "rebuilding function");
+
+    return this.client.request<FunctionRebuildResult>(
+      `/projects/v1/${encodeURIComponent(projectId)}/functions/${encodeURIComponent(name)}/rebuild`,
+      {
+        method: "POST",
+        context: "rebuilding function",
+      },
+    );
+  }
+
+  /**
+   * Refresh ALL of a project's functions onto the gateway's current entry
+   * wrapper + bundled runtime (capability `function-runtime-rebuild`). Same
+   * deterministic, deps-locked, release-agnostic semantics as
+   * {@link Functions.rebuild} applied per function.
+   *
+   * Per-function failures are isolated and never abort the batch: a function
+   * that fails to rebuild (bundle/upload error, or the
+   * `CANNOT_REBUILD_UNLOCKED_DEPS` refusal) keeps its previously-deployed
+   * artifact and is reported as `{ rebuilt: false, error, code? }` in
+   * `results`. Wallet-authed (project ownership) and allowed during billing
+   * grace.
+   */
+  async rebuildAll(projectId: string): Promise<FunctionRebuildBatchResult> {
+    return this.client.request<FunctionRebuildBatchResult>(
+      `/projects/v1/${encodeURIComponent(projectId)}/functions/rebuild`,
+      {
+        method: "POST",
+        context: "rebuilding functions",
       },
     );
   }

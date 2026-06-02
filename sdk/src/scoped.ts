@@ -122,6 +122,8 @@ import type {
   FunctionListResult,
   FunctionLogsOptions,
   FunctionLogsResult,
+  FunctionRebuildBatchResult,
+  FunctionRebuildResult,
   FunctionUpdateOptions,
   FunctionUpdateResult,
 } from "./namespaces/functions.types.js";
@@ -645,6 +647,12 @@ class ScopedFunctions {
   }
   update(name: string, opts: FunctionUpdateOptions): Promise<FunctionUpdateResult> {
     return this.parent.functions.update(this.projectId, name, opts);
+  }
+  rebuild(name: string): Promise<FunctionRebuildResult> {
+    return this.parent.functions.rebuild(this.projectId, name);
+  }
+  rebuildAll(): Promise<FunctionRebuildBatchResult> {
+    return this.parent.functions.rebuildAll(this.projectId);
   }
 }
 

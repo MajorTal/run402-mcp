@@ -218,6 +218,11 @@ const SURFACE: Capability[] = [
   { id: "list_functions",    endpoint: "GET /projects/v1/admin/:id/functions",                mcp: "list_functions",    cli: "functions:list",   openclaw: "functions:list" },
   { id: "delete_function",   endpoint: "DELETE /projects/v1/admin/:id/functions/:name",      mcp: "delete_function",   cli: "functions:delete", openclaw: "functions:delete" },
   { id: "update_function",   endpoint: "PATCH /projects/v1/admin/:id/functions/:name",     mcp: "update_function",   cli: "functions:update", openclaw: "functions:update" },
+  // function-runtime-rebuild (v1.69): opt-in refresh onto the current platform
+  // runtime. The CLI `functions rebuild [name] [--all]` collapses the single
+  // (`:name/rebuild`) and project-wide (`/rebuild`) endpoints into one verb;
+  // the batch SDK method is in SDK_ONLY_METHODS. MCP tool deferred (gh#416).
+  { id: "rebuild_function",  endpoint: "POST /projects/v1/:id/functions/:name/rebuild",     mcp: null,                cli: "functions:rebuild", openclaw: "functions:rebuild" },
 
   // ── Secrets ──────────────────────────────────────────────────────────────
   { id: "set_secret",        endpoint: "POST /projects/v1/admin/:id/secrets",        mcp: "set_secret",    cli: "secrets:set",    openclaw: "secrets:set" },
@@ -471,6 +476,7 @@ const SDK_BY_CAPABILITY: Record<string, string | null> = {
   list_functions: "functions.list",
   delete_function: "functions.delete",
   update_function: "functions.update",
+  rebuild_function: "functions.rebuild",
 
   // Secrets
   set_secret: "secrets.set",
@@ -898,6 +904,11 @@ describe("SDK surface alignment", () => {
       // direct SDK consumers; no dedicated MCP/CLI verb.
       "wallets.getLabel",
       "wallets.setLabel",
+      // ─── function-runtime-rebuild (v1.69) — project-wide variant ──────────
+      // `functions.rebuild` (single) is the canonical capability; `rebuildAll`
+      // shares the `run402 functions rebuild --all` CLI verb (and the deferred
+      // `functions_rebuild` MCP tool), so it has no dedicated leaf command.
+      "functions.rebuildAll",
     ]);
 
     const sdkMethods = await listSdkMethods();

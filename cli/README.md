@@ -118,7 +118,11 @@ run402 functions deploy <id> my-fn --file fn.ts \
   --deps "stripe,zod@^3"
 run402 functions logs <id> my-fn --tail 100 --request-id req_abc123 --follow
 run402 functions invoke <id> my-fn --body '{"hello":"world"}'
+run402 functions rebuild <id> my-fn      # refresh ONE function onto the current runtime
+run402 functions rebuild <id> --all      # refresh every function in the project
 ```
+
+`functions rebuild` is opt-in and never changes your source: it re-bundles the stored source against the platform's current runtime/entry-wrapper (deps pinned to the exact versions recorded at deploy), so a gateway-side wrapper fix (e.g. an SSR `auth.*` fix) reaches an already-deployed function — a plain redeploy with unchanged source does not. The source `code_hash` is unchanged and no new release is created. Functions deployed before dependency locking return `CANNOT_REBUILD_UNLOCKED_DEPS`; redeploy those from source instead. `run402 doctor` flags functions on a stale runtime.
 
 Functions run on Node 22 with `@run402/functions` auto-bundled. Inside the handler:
 

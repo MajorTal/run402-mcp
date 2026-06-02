@@ -512,9 +512,13 @@ run402 functions deploy <id> my-fn --file fn.ts \
 run402 functions invoke <id> my-fn --body '{"hello":"world"}'
 run402 functions logs   <id> my-fn --tail 100 --request-id req_abc123 --follow
 run402 functions update <id> my-fn --schedule "0 */6 * * *"
+run402 functions rebuild <id> my-fn      # refresh ONE function onto the current platform runtime
+run402 functions rebuild <id> --all      # refresh every function in the project
 run402 functions list   <id>
 run402 functions delete <id> my-fn
 ```
+
+`run402 functions rebuild` is opt-in and never changes your source: it re-bundles the stored source against the platform's current runtime/entry-wrapper (deps pinned to the versions recorded at deploy), so the source `code_hash` is unchanged and no new release is created. This is how a gateway-side wrapper fix (e.g. an SSR `auth.*` fix) reaches an already-deployed function — a plain redeploy with unchanged source does not. Functions deployed before dependency locking return `CANNOT_REBUILD_UNLOCKED_DEPS`; redeploy those from source instead. `run402 doctor` flags functions running a stale runtime so you know when to rebuild.
 
 `--deps` accepts npm specs: bare names (`lodash`) resolve to the latest version at deploy time, pinned (`lodash@4.17.21`) and ranges (`date-fns@^3.0.0`) are honored verbatim. Max 30 entries, 200 chars each. Native binary modules (`sharp`, `canvas`, native bcrypt, etc.) are rejected — pure JS only. Don't list `@run402/functions` (auto-bundled).
 

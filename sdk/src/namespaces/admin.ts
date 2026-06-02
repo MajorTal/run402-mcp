@@ -233,6 +233,18 @@ export interface OperatorStatusResult {
     crossed_at: string;
     last_observed_value: number | null;
   }>;
+  /**
+   * Runtime-staleness summary for the wallet's deployed functions
+   * (capability `function-runtime-rebuild`, gateway v1.69+). A function is
+   * stale when its deployed Lambda zip carries an older gateway entry wrapper
+   * / bundled runtime than the gateway's current build. Read-only — observing
+   * staleness never mutates a function. Refresh with `run402 functions
+   * rebuild --all`. Omitted by gateways older than v1.69.
+   */
+  runtime?: {
+    stale_function_count: number;
+    stale_functions: Array<{ project_id: string; name: string }>;
+  };
 }
 
 export class Admin {

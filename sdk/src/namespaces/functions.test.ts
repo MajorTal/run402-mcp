@@ -8,7 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { Run402 } from "../index.js";
-import { LocalError, ProjectNotFound } from "../errors.js";
+import { ApiError, LocalError, ProjectNotFound } from "../errors.js";
 import type { CredentialsProvider } from "../credentials.js";
 
 function makeCreds(): CredentialsProvider {
@@ -450,5 +450,119 @@ describe("functions.update", () => {
       );
       assert.equal(calls.length, 0);
     }
+  });
+});
+
+describe("functions.rebuild", () => {
+  it("POSTs the single-function rebuild path with wallet auth (no service key)", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({
+        name: "hello",
+        rebuilt: true,
+        old_fingerprint: "old",
+        new_fingerprint: "new",
+        runtime_version_before: "1.59.0",
+        runtime_version_after: "1.60.0",
+        code_hash: "sha256:unchanged",
+      }),
+    );
+    const sdk = makeSdk(fetch);
+    const result = await sdk.functions.rebuild("prj_known", "hello");
+    assert.equal(calls[0]!.url, "https://api.example.test/projects/v1/prj_known/functions/hello/rebuild");
+    assert.equal(calls[0]!.method, "POST");
+    // Wallet/allowance auth (walletAuth on the gateway) — not the service key.
+    assert.equal(calls[0]!.headers["SIGN-IN-WITH-X"], "test");
+    assert.equal(calls[0]!.headers["Authorization"], undefined);
+    assert.equal(result.rebuilt, true);
+    assert.equal(result.code_hash, "sha256:unchanged");
+  });
+
+  it("does not require the project in the keystore (wallet-derived ownership)", async () => {
+    // Unlike service-key methods, rebuild is wallet-authed: the gateway derives
+    // the service key from the wallet-owned project, so the SDK must not do a
+    // local keystore lookup (which would wrongly throw ProjectNotFound).
+    const { fetch, calls } = mockFetch(() =>
+      json({
+        name: "hello",
+        rebuilt: true,
+        old_fingerprint: null,
+        new_fingerprint: "new",
+        runtime_version_before: null,
+        runtime_version_after: "1.60.0",
+        code_hash: "sha256:unchanged",
+      }),
+    );
+    const sdk = makeSdk(fetch);
+    await sdk.functions.rebuild("prj_not_in_keystore", "hello");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]!.url, "https://api.example.test/projects/v1/prj_not_in_keystore/functions/hello/rebuild");
+  });
+
+  it("rejects invalid names before calling the gateway", async () => {
+    const invalidValues = ["", "  ", "-bad", "bad/name", "bad name", "Bad"];
+    for (const value of invalidValues) {
+      const { fetch, calls } = mockFetch(() => {
+        throw new Error(`unexpected fetch for ${JSON.stringify(value)}`);
+      });
+      const sdk = makeSdk(fetch);
+      await assert.rejects(
+        sdk.functions.rebuild("prj_known", value),
+        (err: unknown) => err instanceof LocalError && /name/.test(err.message),
+      );
+      assert.equal(calls.length, 0);
+    }
+  });
+
+  it("surfaces CANNOT_REBUILD_UNLOCKED_DEPS as a 409 ApiError preserving the code", async () => {
+    const { fetch } = mockFetch(() =>
+      json(
+        {
+          error: "Function 'legacy' was deployed before dependency locking; redeploy from source to refresh its runtime.",
+          code: "CANNOT_REBUILD_UNLOCKED_DEPS",
+        },
+        409,
+      ),
+    );
+    const sdk = makeSdk(fetch);
+    await assert.rejects(
+      sdk.functions.rebuild("prj_known", "legacy"),
+      (err: unknown) =>
+        err instanceof ApiError &&
+        err.status === 409 &&
+        (err.body as { code?: string }).code === "CANNOT_REBUILD_UNLOCKED_DEPS",
+    );
+  });
+});
+
+describe("functions.rebuildAll", () => {
+  it("POSTs the project-wide rebuild path and returns the batch envelope", async () => {
+    const { fetch, calls } = mockFetch(() =>
+      json({
+        rebuilt_count: 1,
+        total: 2,
+        results: [
+          {
+            name: "ok-fn",
+            rebuilt: true,
+            old_fingerprint: "old",
+            new_fingerprint: "new",
+            runtime_version_before: "1.59.0",
+            runtime_version_after: "1.60.0",
+            code_hash: "sha256:unchanged",
+          },
+          { name: "legacy-fn", rebuilt: false, code: "CANNOT_REBUILD_UNLOCKED_DEPS", error: "deployed before dependency locking" },
+        ],
+      }),
+    );
+    const sdk = makeSdk(fetch);
+    const result = await sdk.functions.rebuildAll("prj_known");
+    assert.equal(calls[0]!.url, "https://api.example.test/projects/v1/prj_known/functions/rebuild");
+    assert.equal(calls[0]!.method, "POST");
+    assert.equal(calls[0]!.headers["SIGN-IN-WITH-X"], "test");
+    assert.equal(calls[0]!.headers["Authorization"], undefined);
+    assert.equal(result.rebuilt_count, 1);
+    assert.equal(result.total, 2);
+    assert.equal(result.results.length, 2);
+    assert.equal(result.results[1]!.rebuilt, false);
   });
 });

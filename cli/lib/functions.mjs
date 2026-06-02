@@ -25,6 +25,10 @@ Subcommands:
                                        Get function logs
   update <id> <name> [--schedule <cron>] [--schedule-remove] [--timeout <s>] [--memory <mb>]
                                        Update function schedule or config without re-deploying
+  rebuild <id> [<name>] [--all]        Refresh function(s) onto the current platform
+                                       runtime (re-bundles from stored source; no
+                                       source change). Pass <name> for one function
+                                       or --all for every function in the project.
   list   <id>                          List all functions for a project
   delete <id> <name>                   Delete a function
 
@@ -40,12 +44,17 @@ Examples:
   run402 functions update prj_abc123 send-reminders --schedule '0 */4 * * *'
   run402 functions update prj_abc123 send-reminders --schedule-remove
   run402 functions update prj_abc123 my-func --timeout 15 --memory 256
+  run402 functions rebuild prj_abc123 stripe-webhook
+  run402 functions rebuild prj_abc123 --all
   run402 functions list prj_abc123
   run402 functions delete prj_abc123 stripe-webhook
 
 Notes:
   - Code must export a default async function: export default async (req: Request) => Response
   - Deploy may require payment if the project lease has expired
+  - 'rebuild' is opt-in and never changes your source: it re-bundles the stored
+    source against the current platform runtime so a gateway-side wrapper fix
+    reaches an already-deployed function. 'run402 doctor' flags stale functions.
 `;
 
 const SUB_HELP = {
@@ -166,6 +175,45 @@ Examples:
   run402 functions update prj_abc123 send-reminders --schedule '0 */4 * * *'
   run402 functions update prj_abc123 send-reminders --schedule-remove
   run402 functions update prj_abc123 my-func --timeout 15 --memory 256
+`,
+  rebuild: `run402 functions rebuild — Refresh function(s) onto the current platform runtime
+
+Usage:
+  run402 functions rebuild <project_id> <name>
+  run402 functions rebuild <project_id> --all
+
+Arguments:
+  <project_id>        Target project ID
+  <name>              Function name to rebuild (omit when using --all)
+
+Options:
+  --all               Rebuild every function in the project
+
+What it does:
+  Re-bundles a function from its STORED source against the platform's current
+  entry wrapper + bundled runtime, with dependencies pinned to the exact
+  versions recorded at deploy time. The only thing that changes is the platform
+  runtime/wrapper — your source 'code_hash' is unchanged and no new release is
+  created. This is how a gateway-side wrapper fix (e.g. an SSR auth.* fix)
+  reaches a function that was already deployed: a plain redeploy with unchanged
+  source does NOT pick it up. Strictly opt-in — the platform never auto-rebuilds.
+
+  Allowed during billing grace (past_due / frozen / dormant).
+
+Output:
+  Single: a JSON object { name, rebuilt, old_fingerprint, new_fingerprint,
+    runtime_version_before, runtime_version_after, code_hash }.
+  --all:  a JSON object { rebuilt_count, total, results: [...] }; each result is
+    either a rebuild record or { name, rebuilt: false, code?, error }. Functions
+    deployed before dependency locking report code CANNOT_REBUILD_UNLOCKED_DEPS
+    — redeploy them from source ('run402 functions deploy') to refresh instead.
+
+Notes:
+  - Run 'run402 doctor' to see which functions are on a stale runtime.
+
+Examples:
+  run402 functions rebuild prj_abc123 stripe-webhook
+  run402 functions rebuild prj_abc123 --all
 `,
   list: `run402 functions list — List all functions for a project
 
@@ -418,6 +466,85 @@ async function update(projectId, name, args) {
   }
 }
 
+const UNLOCKED_DEPS_HINT =
+  "Function was deployed before dependency locking — redeploy from source " +
+  "(run402 functions deploy <id> <name> --file <file>) to refresh its runtime instead.";
+
+// Annotate a `rebuild --all` batch with an actionable hint on per-function
+// CANNOT_REBUILD_UNLOCKED_DEPS refusals. The batch endpoint returns 200 with
+// per-function outcomes (failures never abort the batch), so these arrive as
+// data, not a thrown error.
+function annotateRebuildBatch(data) {
+  if (!data || !Array.isArray(data.results)) return data;
+  return {
+    ...data,
+    results: data.results.map((entry) =>
+      entry && entry.rebuilt === false && entry.code === "CANNOT_REBUILD_UNLOCKED_DEPS"
+        ? { ...entry, hint: UNLOCKED_DEPS_HINT }
+        : entry,
+    ),
+  };
+}
+
+async function rebuild(projectId, args = []) {
+  assertRequiredProject(projectId, "run402 functions rebuild <project_id> [<name>] [--all]");
+  assertKnownFlags(args, ["--all", "--help", "-h"]);
+  let all = false;
+  const positionals = [];
+  for (const arg of args) {
+    if (arg === "--all") { all = true; continue; }
+    positionals.push(arg);
+  }
+  if (positionals.length > 1) {
+    fail({
+      code: "BAD_USAGE",
+      message: `Unexpected argument: ${positionals[1]}`,
+      hint: "run402 functions rebuild <project_id> [<name>] [--all]",
+      details: { argument: positionals[1] },
+    });
+  }
+  const name = positionals[0];
+  if (all && name) {
+    fail({
+      code: "BAD_USAGE",
+      message: "Pass either <name> or --all, not both.",
+      hint: "run402 functions rebuild <project_id> [<name>] [--all]",
+    });
+  }
+  if (!all && !name) {
+    fail({
+      code: "BAD_USAGE",
+      message: "Provide a function <name>, or pass --all to rebuild every function in the project.",
+      hint: "run402 functions rebuild <project_id> [<name>] [--all]",
+    });
+  }
+
+  try {
+    if (all) {
+      const data = await getSdk().functions.rebuildAll(projectId);
+      console.log(JSON.stringify(annotateRebuildBatch(data), null, 2));
+    } else {
+      const data = await getSdk().functions.rebuild(projectId, name);
+      console.log(JSON.stringify(data, null, 2));
+    }
+  } catch (err) {
+    // Map the single-function unlocked-deps refusal to a clear, actionable
+    // envelope. The gateway returns 409 with code CANNOT_REBUILD_UNLOCKED_DEPS
+    // for functions deployed before dependency locking.
+    if (err?.status === 409 && err?.body && typeof err.body === "object" && err.body.code === "CANNOT_REBUILD_UNLOCKED_DEPS") {
+      fail({
+        code: "CANNOT_REBUILD_UNLOCKED_DEPS",
+        message: err.body.error || err.body.message || "Function was deployed before dependency locking.",
+        hint: UNLOCKED_DEPS_HINT,
+        next_actions: [`run402 functions deploy ${projectId} ${name} --file <file>`],
+        retryable: false,
+        safe_to_retry: false,
+      });
+    }
+    reportSdkError(err);
+  }
+}
+
 async function list(projectId, args = []) {
   assertRequiredProject(projectId, "run402 functions list <project_id>");
   assertKnownFlags(args, ["--help", "-h"]);
@@ -454,6 +581,7 @@ export async function run(sub, args) {
     case "invoke": await invoke(args[0], args[1], args.slice(2)); break;
     case "logs":   await logs(args[0], args[1], args.slice(2)); break;
     case "update": await update(args[0], args[1], args.slice(2)); break;
+    case "rebuild": await rebuild(args[0], args.slice(1)); break;
     case "list":   await list(args[0], args.slice(1)); break;
     case "delete": await deleteFunction(args[0], args[1], args.slice(2)); break;
     default:

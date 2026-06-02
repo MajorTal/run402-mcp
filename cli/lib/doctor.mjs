@@ -39,6 +39,9 @@ Checks performed:
   - Keystore has at least one wallet
   - API_BASE is reachable (network check via /health)
   - Active tier resolves and is not 'past_due' / 'frozen'
+  - Function runtime staleness: deployed functions running an older platform
+    runtime than the current gateway build (refresh with 'run402 functions
+    rebuild --all'; re-bundles from your stored source, no source change)
   - Source scan: hallucinated SDK auth names (R402_AUTH_UNKNOWN_EXPORT),
     state-changing GET handlers (R402_AUTH_STATE_CHANGING_GET),
     auth.* calls in prerendered pages (R402_AUTH_PRERENDERED),
@@ -227,15 +230,56 @@ export async function run(sub, args = []) {
     } else {
       checks.push({ name: "operator_health", status: "ok" });
     }
+
+    // 6b. Function runtime staleness (v1.69, capability
+    // function-runtime-rebuild). A deployed function is stale when its Lambda
+    // zip carries an older platform entry wrapper / bundled runtime than the
+    // gateway's current build — a plain redeploy with unchanged source does
+    // NOT refresh it (apply's release diff keys on the source code_hash, not
+    // the wrapper). Read-only signal; refreshing is strictly opt-in. Reuses
+    // the operator status fetched above to avoid a second round-trip.
+    const runtime = status.runtime;
+    if (runtime && typeof runtime.stale_function_count === "number") {
+      if (runtime.stale_function_count > 0) {
+        checks.push({
+          name: "runtime_staleness",
+          status: "warning",
+          value: {
+            stale_function_count: runtime.stale_function_count,
+            stale_functions: runtime.stale_functions ?? [],
+          },
+          hint: `${runtime.stale_function_count} function(s) are running an older platform runtime. Run 'run402 functions rebuild --all' to refresh (re-bundles from your stored source; no source change).`,
+        });
+      } else {
+        checks.push({
+          name: "runtime_staleness",
+          status: "ok",
+          value: { stale_function_count: 0 },
+        });
+      }
+    } else {
+      // Gateway older than v1.69 doesn't surface the runtime block.
+      checks.push({
+        name: "runtime_staleness",
+        status: "skipped",
+        ...(verbose && { hint: "operator status has no 'runtime' block; requires v1.69+ gateway." }),
+      });
+    }
   } catch (err) {
     // Operator status endpoint may not be reachable if the operator-binding
     // substrate isn't deployed yet on the target API. Don't fail the whole
-    // doctor over it — emit as a soft warning.
+    // doctor over it — emit as a soft warning. The runtime-staleness check
+    // rides on the same fetch, so skip it for the same reason.
     checks.push({
       name: "operator_health",
       status: "skipped",
       message: err instanceof Error ? err.message : String(err),
       ...(verbose && { hint: "GET /agent/v1/operator/status not reachable; requires v1.55+ gateway." }),
+    });
+    checks.push({
+      name: "runtime_staleness",
+      status: "skipped",
+      message: err instanceof Error ? err.message : String(err),
     });
   }
 

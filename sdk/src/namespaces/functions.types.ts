@@ -147,10 +147,64 @@ export interface FunctionSummary {
    * Direct deps only, not a full lockfile.
    */
   deps_resolved?: Record<string, string> | null;
+  /**
+   * `true` when the deployed Lambda zip carries an older gateway entry
+   * wrapper / bundled runtime than the gateway's current build — a plain
+   * redeploy with unchanged source does NOT refresh it (apply's release
+   * diff keys on the source `code_hash`, not the wrapper). Refresh with
+   * `r.project(id).functions.rebuild(name)` / `run402 functions rebuild`.
+   * Capability `function-runtime-rebuild` (gateway v1.69+). Omitted by
+   * gateways that don't yet derive staleness on this surface.
+   */
+  runtime_stale?: boolean;
 }
 
 export interface FunctionListResult {
   functions: FunctionSummary[];
+}
+
+/**
+ * Result of refreshing a single function onto the gateway's current entry
+ * wrapper + bundled runtime via {@link Functions.rebuild}. The rebuild
+ * re-bundles from the function's STORED source with dependencies pinned to
+ * the recorded `deps_resolved` exact versions, so the only change is the
+ * wrapper/runtime: `code_hash` is unchanged and no new release is created.
+ */
+export interface FunctionRebuildResult {
+  name: string;
+  /** Always `true` on this (success) shape; the batch result uses a union. */
+  rebuilt: true;
+  /** The function's build fingerprint before the rebuild. `null` for rows deployed before fingerprinting. */
+  old_fingerprint: string | null;
+  /** The gateway's current build fingerprint, now stamped on the function. */
+  new_fingerprint: string;
+  /** Bundled `@run402/functions` version before the rebuild. */
+  runtime_version_before: string | null;
+  /** Bundled `@run402/functions` version after the rebuild. */
+  runtime_version_after: string | null;
+  /** Unchanged by a rebuild (source is identical) — surfaced so callers can assert the wrapper-only guarantee. */
+  code_hash: string;
+}
+
+/**
+ * Per-function entry in a project-wide rebuild ({@link Functions.rebuildAll}).
+ * Either the successful {@link FunctionRebuildResult} or a non-aborting
+ * failure: a rebuild that fails (bundle error, upload error, or the
+ * `CANNOT_REBUILD_UNLOCKED_DEPS` refusal for functions deployed before
+ * dependency locking) leaves the old artifact intact and is reported here.
+ */
+export type FunctionRebuildBatchEntry =
+  | FunctionRebuildResult
+  | { name: string; rebuilt: false; code?: string; error: string };
+
+/** Project-wide rebuild result from {@link Functions.rebuildAll}. */
+export interface FunctionRebuildBatchResult {
+  /** Number of functions that rebuilt successfully. */
+  rebuilt_count: number;
+  /** Total functions considered. */
+  total: number;
+  /** Per-function outcomes; failures never abort the batch. */
+  results: FunctionRebuildBatchEntry[];
 }
 
 export interface DeleteFunctionResult {
